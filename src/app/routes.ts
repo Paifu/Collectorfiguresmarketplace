@@ -1,4 +1,4 @@
-import { createHashRouter } from "react-router";
+import { createHashRouter } from "react-router-dom";
 import { RootWrapper } from "./components/RootWrapper";
 import { Layout } from "./components/Layout";
 import { LoginPage } from "./components/LoginPage";

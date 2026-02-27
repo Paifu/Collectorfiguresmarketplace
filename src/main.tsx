@@ -1,13 +1,5 @@
-import { createHashRouter, RouterProvider } from "react-router-dom";
-import Home from "./Home"; // ajusta imports si hace falta
+import { createRoot } from "react-dom/client";
+import App from "./app/App.tsx";
+import "./styles/index.css";
 
-const router = createHashRouter([
-  {
-    path: "/",
-    element: <Home />,
-  },
-]);
-
-export default function App() {
-  return <RouterProvider router={router} />;
-}
+createRoot(document.getElementById("root")!).render(<App />);

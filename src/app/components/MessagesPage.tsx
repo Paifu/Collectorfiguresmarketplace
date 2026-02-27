@@ -1,9 +1,8 @@
 import { useState, useRef, useEffect } from "react";
 import {
   MOCK_CONVERSATIONS, MOCK_MARKET_LISTINGS,
-  type Conversation, type ChatMessage, type Offer, type MarketListing,
+  type Conversation, type ChatMessage, type Offer,
 } from "../lib/mock-data";
-import { Card, CardContent } from "./ui/card";
 import { Badge } from "./ui/badge";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
@@ -12,7 +11,7 @@ import { Textarea } from "./ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "./ui/dialog";
 import {
-  Send, HandCoins, Clock, Truck, MessageCircle, Store,
+  Send, HandCoins, Clock, Truck, MessageCircle, Store, Sparkles, Loader2,
 } from "lucide-react";
 import { ImageWithFallback } from "./figma/ImageWithFallback";
 import { toast } from "sonner";
@@ -20,11 +19,31 @@ import { useNavigate } from "react-router";
 
 export function MessagesPage() {
   const [conversations, setConversations] = useState<Conversation[]>(MOCK_CONVERSATIONS);
-  const [activeConvId, setActiveConvId] = useState<string | null>(
-    MOCK_CONVERSATIONS.length > 0 ? MOCK_CONVERSATIONS[0].id : null
-  );
+
+  // ✅ FIX: en mobile entramos SIEMPRE a la lista (sin chat abierto)
+  const [activeConvId, setActiveConvId] = useState<string | null>(null);
+
   const [newMessage, setNewMessage] = useState("");
   const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  // Detect desktop (md+) para auto-seleccionar el primer chat SOLO en desktop
+  const [isDesktop, setIsDesktop] = useState(false);
+  useEffect(() => {
+    const mq = window.matchMedia("(min-width: 768px)");
+    const update = () => setIsDesktop(mq.matches);
+    update();
+    mq.addEventListener?.("change", update);
+    return () => mq.removeEventListener?.("change", update);
+  }, []);
+
+  // ✅ En desktop, si no hay chat seleccionado, abrimos el primero automáticamente
+  useEffect(() => {
+    if (!isDesktop) return;
+    if (activeConvId) return;
+    if (conversations.length === 0) return;
+    setActiveConvId(conversations[0].id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isDesktop, conversations.length]);
 
   // Offer modal
   const [showOfferModal, setShowOfferModal] = useState(false);
@@ -33,14 +52,16 @@ export function MessagesPage() {
   const [offerShipping, setOfferShipping] = useState("correos");
   const [offerExpiry, setOfferExpiry] = useState("48h");
 
-  const activeConv = conversations.find((c) => c.id === activeConvId);
+  const activeConv = conversations.find((c) => c.id === activeConvId) || null;
+
   const activeListing = activeConv
     ? MOCK_MARKET_LISTINGS.find((l) => l.id === activeConv.listingId) || null
     : null;
 
   useEffect(() => {
+    if (!activeConv) return;
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [activeConv?.messages.length]);
+  }, [activeConv?.messages.length]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleSend = () => {
     if (!newMessage.trim() || !activeConvId) return;
@@ -55,7 +76,9 @@ export function MessagesPage() {
     };
     setConversations((convs) =>
       convs.map((c) =>
-        c.id === activeConvId ? { ...c, messages: [...c.messages, msg], lastMessage: newMessage, lastMessageTime: "Ahora" } : c
+        c.id === activeConvId
+          ? { ...c, messages: [...c.messages, msg], lastMessage: newMessage, lastMessageTime: "Ahora", unread: 0 }
+          : c
       )
     );
     setNewMessage("");
@@ -68,7 +91,12 @@ export function MessagesPage() {
       amount: parseFloat(offerAmount),
       note: offerNote,
       expiry: offerExpiry,
-      shippingMethod: offerShipping === "correos" ? "Correos Express" : offerShipping === "mano" ? "En mano" : "Mensajeria",
+      shippingMethod:
+        offerShipping === "correos"
+          ? "Correos Express"
+          : offerShipping === "mano"
+            ? "En mano"
+            : "Mensajeria",
       status: "pending",
       timestamp: new Date().toLocaleTimeString("es-ES", { hour: "2-digit", minute: "2-digit" }),
     };
@@ -93,7 +121,15 @@ export function MessagesPage() {
     };
     setConversations((convs) =>
       convs.map((c) =>
-        c.id === activeConvId ? { ...c, messages: [...c.messages, sysMsg, offerMsg], lastMessage: `Oferta: ${offer.amount}\u20AC`, lastMessageTime: "Ahora" } : c
+        c.id === activeConvId
+          ? {
+              ...c,
+              messages: [...c.messages, sysMsg, offerMsg],
+              lastMessage: `Oferta: ${offer.amount}\u20AC`,
+              lastMessageTime: "Ahora",
+              unread: 0,
+            }
+          : c
       )
     );
     setShowOfferModal(false);
@@ -119,15 +155,20 @@ export function MessagesPage() {
 
   return (
     <div className="h-[calc(100vh-56px)] md:h-[calc(100vh-57px)] flex flex-col md:flex-row">
-      {/* Conversation list */}
+      {/* Conversation list (Desktop) */}
       <div className="hidden md:flex flex-col w-72 border-r border-border bg-card shrink-0">
         <div className="p-3 border-b border-border">
           <h2 className="text-foreground" style={{ fontSize: "0.9rem" }}>Mensajes</h2>
         </div>
         <div className="flex-1 overflow-y-auto">
           {conversations.map((conv) => (
-            <button key={conv.id} onClick={() => setActiveConvId(conv.id)}
-              className={`w-full text-left p-3 border-b border-border hover:bg-accent/50 transition-colors ${activeConvId === conv.id ? "bg-accent/50" : ""}`}>
+            <button
+              key={conv.id}
+              onClick={() => setActiveConvId(conv.id)}
+              className={`w-full text-left p-3 border-b border-border hover:bg-accent/50 transition-colors ${
+                activeConvId === conv.id ? "bg-accent/50" : ""
+              }`}
+            >
               <div className="flex items-center gap-2.5">
                 <div className="w-10 h-10 rounded-lg overflow-hidden bg-secondary/30 shrink-0">
                   <ImageWithFallback src={conv.listingImage} alt="" className="w-full h-full object-cover" />
@@ -135,10 +176,15 @@ export function MessagesPage() {
                 <div className="flex-1 min-w-0">
                   <p className="text-foreground truncate" style={{ fontSize: "0.8rem" }}>{conv.listingName}</p>
                   <p className="text-muted-foreground truncate" style={{ fontSize: "0.7rem" }}>{conv.participantName}</p>
+                  <p className="text-muted-foreground truncate" style={{ fontSize: "0.65rem" }}>{conv.lastMessage}</p>
                 </div>
                 <div className="flex flex-col items-end gap-1">
                   <span className="text-muted-foreground" style={{ fontSize: "0.6rem" }}>{conv.lastMessageTime}</span>
-                  {conv.unread > 0 && <Badge className="w-5 h-5 flex items-center justify-center p-0 text-[0.55rem] bg-[#9CFF49] text-[#0a0a0a]">{conv.unread}</Badge>}
+                  {conv.unread > 0 && (
+                    <Badge className="w-5 h-5 flex items-center justify-center p-0 text-[0.55rem] bg-[#9CFF49] text-[#0a0a0a]">
+                      {conv.unread}
+                    </Badge>
+                  )}
                 </div>
               </div>
             </button>
@@ -146,21 +192,49 @@ export function MessagesPage() {
         </div>
       </div>
 
-      {/* Mobile: simple conv list if no active */}
+      {/* ✅ Mobile: lista SIEMPRE (cuando no hay chat seleccionado) */}
       {!activeConv && (
-        <div className="md:hidden flex-1 overflow-y-auto">
+        <div className="md:hidden flex-1 overflow-y-auto bg-background">
+          <div className="p-3 border-b border-border bg-card">
+            <h2 className="text-foreground" style={{ fontSize: "0.9rem" }}>Mensajes</h2>
+            <p className="text-muted-foreground" style={{ fontSize: "0.7rem" }}>
+              {conversations.length} conversaciones
+            </p>
+          </div>
+
           {conversations.map((conv) => (
-            <button key={conv.id} onClick={() => setActiveConvId(conv.id)}
-              className="w-full text-left p-3 border-b border-border hover:bg-accent/50 transition-colors">
+            <button
+              key={conv.id}
+              onClick={() => setActiveConvId(conv.id)}
+              className="w-full text-left p-3 border-b border-border hover:bg-accent/50 transition-colors"
+            >
               <div className="flex items-center gap-2.5">
-                <div className="w-10 h-10 rounded-lg overflow-hidden bg-secondary/30 shrink-0">
+                {/* Producto */}
+                <div className="w-12 h-12 rounded-lg overflow-hidden bg-secondary/30 shrink-0">
                   <ImageWithFallback src={conv.listingImage} alt="" className="w-full h-full object-cover" />
                 </div>
+
                 <div className="flex-1 min-w-0">
-                  <p className="text-foreground truncate" style={{ fontSize: "0.8rem" }}>{conv.listingName}</p>
-                  <p className="text-muted-foreground truncate" style={{ fontSize: "0.7rem" }}>{conv.participantName} · {conv.lastMessage}</p>
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="text-foreground truncate" style={{ fontSize: "0.85rem" }}>{conv.listingName}</p>
+                    <span className="text-[#9CFF49] shrink-0" style={{ fontSize: "0.85rem" }}>
+                      {conv.listingPrice}&euro;
+                    </span>
+                  </div>
+
+                  <p className="text-muted-foreground truncate" style={{ fontSize: "0.75rem" }}>
+                    {conv.participantName}
+                  </p>
+
+                  <p className="text-muted-foreground truncate" style={{ fontSize: "0.7rem" }}>
+                    {conv.lastMessage}
+                  </p>
                 </div>
-                {conv.unread > 0 && <Badge className="bg-[#9CFF49] text-[#0a0a0a]">{conv.unread}</Badge>}
+
+                <div className="flex flex-col items-end gap-1 shrink-0">
+                  <span className="text-muted-foreground" style={{ fontSize: "0.6rem" }}>{conv.lastMessageTime}</span>
+                  {conv.unread > 0 && <Badge className="bg-[#9CFF49] text-[#0a0a0a]">{conv.unread}</Badge>}
+                </div>
               </div>
             </button>
           ))}
@@ -170,25 +244,33 @@ export function MessagesPage() {
       {/* Chat area */}
       {activeConv && (
         <div className="flex-1 flex flex-col bg-background">
-          {/* Header with product info */}
-          <div className="border-b border-border bg-card">
+          {/* ✅ Header sticky con producto + usuario */}
+          <div className="border-b border-border bg-card sticky top-0 z-10">
             <div className="flex items-center gap-3 p-3">
-              <button onClick={() => setActiveConvId(null)} className="md:hidden text-muted-foreground">
-                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" /></svg>
+              {/* Back en mobile para volver a lista */}
+              <button
+                onClick={() => setActiveConvId(null)}
+                className="md:hidden text-muted-foreground"
+                aria-label="Volver"
+              >
+                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+                </svg>
               </button>
+
               <div className="w-11 h-11 rounded-lg overflow-hidden bg-secondary/30 shrink-0">
                 <ImageWithFallback src={activeConv.listingImage} alt="" className="w-full h-full object-cover" />
               </div>
+
               <div className="flex-1 min-w-0">
                 <p className="text-foreground truncate" style={{ fontSize: "0.85rem" }}>{activeConv.listingName}</p>
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2 flex-wrap">
                   <span className="text-[#9CFF49]" style={{ fontSize: "0.85rem" }}>{activeConv.listingPrice}&euro;</span>
-                  {activeListing && (
-                    <Badge variant="secondary" className="text-[0.55rem]">{activeListing.condition}</Badge>
-                  )}
+                  {activeListing && <Badge variant="secondary" className="text-[0.55rem]">{activeListing.condition}</Badge>}
                   <span className="text-muted-foreground" style={{ fontSize: "0.7rem" }}>&middot; {activeConv.participantName}</span>
                 </div>
               </div>
+
               <Button
                 size="sm"
                 onClick={() => setShowOfferModal(true)}
@@ -207,6 +289,7 @@ export function MessagesPage() {
                 <p style={{ fontSize: "0.8rem" }}>Envia un mensaje o haz una oferta para empezar</p>
               </div>
             )}
+
             {activeConv.messages.map((msg) => (
               <div key={msg.id}>
                 {msg.type === "system" ? (
@@ -265,10 +348,19 @@ export function MessagesPage() {
               <Button variant="outline" size="icon" onClick={() => setShowOfferModal(true)} className="shrink-0">
                 <HandCoins className="w-4 h-4" />
               </Button>
-              <Input value={newMessage} onChange={(e) => setNewMessage(e.target.value)}
+              <Input
+                value={newMessage}
+                onChange={(e) => setNewMessage(e.target.value)}
                 onKeyDown={(e) => e.key === "Enter" && handleSend()}
-                placeholder="Escribe un mensaje..." className="bg-secondary/50" />
-              <Button onClick={handleSend} size="icon" disabled={!newMessage.trim()} className="bg-[#9CFF49] text-[#0a0a0a] hover:bg-[#8ae63e]">
+                placeholder="Escribe un mensaje..."
+                className="bg-secondary/50"
+              />
+              <Button
+                onClick={handleSend}
+                size="icon"
+                disabled={!newMessage.trim()}
+                className="bg-[#9CFF49] text-[#0a0a0a] hover:bg-[#8ae63e]"
+              >
                 <Send className="w-4 h-4" />
               </Button>
             </div>
@@ -284,6 +376,7 @@ export function MessagesPage() {
               <HandCoins className="w-5 h-5" /> Hacer oferta
             </DialogTitle>
           </DialogHeader>
+
           <div className="space-y-4">
             {activeConv && (
               <div className="flex gap-3 p-3 rounded-lg bg-secondary/30">
@@ -299,14 +392,23 @@ export function MessagesPage() {
 
             <div className="space-y-1.5">
               <Label style={{ fontSize: "0.8rem" }}>Tu precio propuesto (&euro;) *</Label>
-              <Input type="number" value={offerAmount} onChange={(e) => setOfferAmount(e.target.value)}
-                placeholder="0.00" className="bg-secondary/50" />
+              <Input
+                type="number"
+                value={offerAmount}
+                onChange={(e) => setOfferAmount(e.target.value)}
+                placeholder="0.00"
+                className="bg-secondary/50"
+              />
             </div>
 
             <div className="space-y-1.5">
               <Label style={{ fontSize: "0.8rem" }}>Nota (opcional)</Label>
-              <Textarea value={offerNote} onChange={(e) => setOfferNote(e.target.value)}
-                placeholder="Ej: Recojo en mano si es en Madrid" className="bg-secondary/50 min-h-[60px]" />
+              <Textarea
+                value={offerNote}
+                onChange={(e) => setOfferNote(e.target.value)}
+                placeholder="Ej: Recojo en mano si es en Madrid"
+                className="bg-secondary/50 min-h-[60px]"
+              />
             </div>
 
             <div className="grid grid-cols-2 gap-3">
@@ -334,7 +436,11 @@ export function MessagesPage() {
               </div>
             </div>
 
-            <Button onClick={handleMakeOffer} className="w-full bg-[#9CFF49] text-[#0a0a0a] hover:bg-[#8ae63e]" disabled={!offerAmount}>
+            <Button
+              onClick={handleMakeOffer}
+              className="w-full bg-[#9CFF49] text-[#0a0a0a] hover:bg-[#8ae63e]"
+              disabled={!offerAmount}
+            >
               Enviar oferta
             </Button>
           </div>

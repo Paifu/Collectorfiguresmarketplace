@@ -1,6 +1,13 @@
 import { useState, useMemo, useRef } from "react";
 import { useNavigate, useParams } from "react-router";
-import { CONDITION_LABELS, getExternalPrices, calculateSuggestedPrice, generateAdText } from "../lib/mock-data";
+import {
+  CONDITION_LABELS,
+  getExternalPrices,
+  calculateSuggestedPrice,
+  generateAdText,
+  searchAutocomplete,
+  type AutocompleteResult,
+} from "../lib/mock-data";
 import { useCollection } from "../lib/collection-store";
 import { PriceChart } from "./PriceChart";
 import { Card, CardContent } from "./ui/card";
@@ -15,8 +22,19 @@ import { Accordion, AccordionItem, AccordionTrigger, AccordionContent } from "./
 import { ImageWithFallback } from "./figma/ImageWithFallback";
 import { toast } from "sonner";
 import {
-  ArrowLeft, TrendingUp, TrendingDown, AlertCircle, Star, Pencil, Trash2,
-  GripVertical, ImagePlus, Check, Sparkles, Package,
+  ArrowLeft,
+  TrendingUp,
+  TrendingDown,
+  AlertCircle,
+  Star,
+  Pencil,
+  Trash2,
+  GripVertical,
+  ImagePlus,
+  Check,
+  Sparkles,
+  Package,
+  Loader2,
 } from "lucide-react";
 
 export function FigureDetailPage() {
@@ -29,6 +47,27 @@ export function FigureDetailPage() {
   const [selectedImageIdx, setSelectedImageIdx] = useState(0);
   const [images, setImages] = useState<string[]>(figure?.images || []);
   const [primaryIdx, setPrimaryIdx] = useState(0);
+
+  // NEW: EAN-13 state (shown on existing figure too)
+  const initialEan = (() => {
+    const digits = String(figure?.upc || "").replace(/\D/g, "").slice(0, 13);
+    return digits.length === 13 ? digits : "";
+  })();
+  const [ean13, setEan13] = useState(initialEan);
+  const [eanLoading, setEanLoading] = useState(false);
+  const [eanError, setEanError] = useState("");
+
+  // NEW: Local “display” fields (since Edit/Save isn’t implemented yet)
+  // These update the visible details when you autocompete by EAN, without breaking storage.
+  const [displayCharacter, setDisplayCharacter] = useState(figure?.character || "");
+  const [displayBrand, setDisplayBrand] = useState(figure?.brand || "");
+  const [displayLine, setDisplayLine] = useState(figure?.line || "");
+  const [displayYear, setDisplayYear] = useState(String(figure?.year || ""));
+  const [displayScale, setDisplayScale] = useState(figure?.scale || "");
+  const [displayMaterial, setDisplayMaterial] = useState(figure?.material || "");
+  const [displayAccessories, setDisplayAccessories] = useState(figure?.accessories || "");
+  const [displayDescription, setDisplayDescription] = useState(figure?.description || "");
+  const [displayLocation, setDisplayLocation] = useState(figure?.location || "");
 
   // Sell toggle
   const [sellEnabled, setSellEnabled] = useState(figure?.forSale || false);
@@ -43,9 +82,8 @@ export function FigureDetailPage() {
   }, [figure]);
 
   const priceDiff = figure ? figure.currentValue - figure.purchasePrice : 0;
-  const pricePercent = figure && figure.purchasePrice > 0
-    ? ((priceDiff / figure.purchasePrice) * 100).toFixed(1)
-    : "0";
+  const pricePercent =
+    figure && figure.purchasePrice > 0 ? ((priceDiff / figure.purchasePrice) * 100).toFixed(1) : "0";
 
   const suggestedPrice = useMemo(() => {
     if (!figure) return 0;
@@ -87,9 +125,7 @@ export function FigureDetailPage() {
   };
 
   const toggleSellImage = (idx: number) => {
-    setSelectedSellImages((prev) =>
-      prev.includes(idx) ? prev.filter((i) => i !== idx) : [...prev, idx]
-    );
+    setSelectedSellImages((prev) => (prev.includes(idx) ? prev.filter((i) => i !== idx) : [...prev, idx]));
   };
 
   const handlePublish = () => {
@@ -105,12 +141,71 @@ export function FigureDetailPage() {
     navigate("/my-figures");
   };
 
+  // NEW: Apply autocomplete result into visible fields of this screen
+  const applyAutocompleteToView = (r: AutocompleteResult) => {
+    // Keep header name unchanged (it comes from figure.name). Update only the details block.
+    setDisplayCharacter(r.character || displayCharacter);
+    setDisplayBrand(r.brand || displayBrand);
+    setDisplayLine(r.line || displayLine);
+    setDisplayYear(String(r.year || displayYear));
+    setDisplayScale(r.scale || displayScale);
+    setDisplayMaterial(r.material || displayMaterial);
+    setDisplayAccessories(r.accessories || displayAccessories);
+    if (r.description) setDisplayDescription(r.description);
+
+    // Store EAN/UPC in the input for clarity
+    const digits = String(r.upc || "").replace(/\D/g, "").slice(0, 13);
+    if (digits.length === 13) setEan13(digits);
+
+    toast.success("Datos autocompletados (vista)", {
+      description: "Esto actualiza la vista actual. El modo edición/guardar llegará pronto.",
+    });
+  };
+
+  // NEW: Autofill by EAN-13 using existing dataset (searchAutocomplete)
+  const handleAutofillByEan = (ean: string) => {
+    const cleaned = ean.replace(/\D/g, "").slice(0, 13);
+
+    if (cleaned.length === 0) {
+      setEanError("");
+      return;
+    }
+
+    if (cleaned.length !== 13) {
+      setEanError("El EAN-13 debe tener 13 dígitos.");
+      return;
+    }
+
+    setEanLoading(true);
+    setEanError("");
+
+    setTimeout(() => {
+      try {
+        const results = searchAutocomplete(cleaned);
+
+        if (results && results.length > 0) {
+          applyAutocompleteToView(results[0]);
+          toast.success("Autocompletado por EAN-13", {
+            description: "Revisa los datos en el bloque DETALLES.",
+          });
+        } else {
+          setEanError("No se encontraron datos para ese EAN-13.");
+          toast.error("No se encontró coincidencia por EAN-13");
+        }
+      } finally {
+        setEanLoading(false);
+      }
+    }, 350);
+  };
+
   if (!figure) {
     return (
       <div className="p-8 text-center text-muted-foreground">
         <Package className="w-10 h-10 mx-auto mb-3 opacity-30" />
         <p>Figura no encontrada</p>
-        <Button variant="ghost" className="mt-4" onClick={() => navigate("/dashboard")}>Volver al Dashboard</Button>
+        <Button variant="ghost" className="mt-4" onClick={() => navigate("/dashboard")}>
+          Volver al Dashboard
+        </Button>
       </div>
     );
   }
@@ -121,7 +216,12 @@ export function FigureDetailPage() {
 
       {/* Header with Edit/Delete */}
       <div className="flex items-center gap-3">
-        <Button variant="ghost" size="sm" onClick={() => navigate(-1)} className="text-muted-foreground outline-none focus-visible:ring-2 focus-visible:ring-[#9CFF49]/50">
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={() => navigate(-1)}
+          className="text-muted-foreground outline-none focus-visible:ring-2 focus-visible:ring-[#9CFF49]/50"
+        >
           <ArrowLeft className="w-4 h-4" />
         </Button>
         <div className="flex-1 min-w-0">
@@ -133,10 +233,20 @@ export function FigureDetailPage() {
         <Badge variant="secondary" className="text-[0.65rem] shrink-0">
           {CONDITION_LABELS[figure.condition]}
         </Badge>
-        <Button variant="outline" size="sm" className="gap-1.5 text-muted-foreground hover:text-foreground shrink-0" onClick={() => toast.info("Editor de figura (proximamente)")}>
+        <Button
+          variant="outline"
+          size="sm"
+          className="gap-1.5 text-muted-foreground hover:text-foreground shrink-0"
+          onClick={() => toast.info("Editor de figura (proximamente)")}
+        >
           <Pencil className="w-3.5 h-3.5" /> Editar
         </Button>
-        <Button variant="outline" size="sm" className="gap-1.5 text-muted-foreground hover:text-red-400 shrink-0" onClick={handleDelete}>
+        <Button
+          variant="outline"
+          size="sm"
+          className="gap-1.5 text-muted-foreground hover:text-red-400 shrink-0"
+          onClick={handleDelete}
+        >
           <Trash2 className="w-3.5 h-3.5" /> Eliminar
         </Button>
       </div>
@@ -146,15 +256,22 @@ export function FigureDetailPage() {
         {/* Gallery */}
         <div className="space-y-3">
           <div className="aspect-square rounded-xl overflow-hidden bg-secondary/30 border border-border">
-            <ImageWithFallback src={images[selectedImageIdx] || figure.image} alt={figure.name} className="w-full h-full object-cover" />
+            <ImageWithFallback
+              src={images[selectedImageIdx] || figure.image}
+              alt={figure.name}
+              className="w-full h-full object-cover"
+            />
           </div>
 
           <div className="flex gap-2 overflow-x-auto pb-1">
             {images.map((img, idx) => (
-              <button key={idx} onClick={() => setSelectedImageIdx(idx)}
+              <button
+                key={idx}
+                onClick={() => setSelectedImageIdx(idx)}
                 className={`relative w-16 h-16 rounded-lg overflow-hidden border-2 shrink-0 transition-colors outline-none focus-visible:ring-2 focus-visible:ring-[#9CFF49]/50 ${
                   selectedImageIdx === idx ? "border-[#9CFF49]" : "border-border hover:border-[#9CFF49]/40"
-                }`}>
+                }`}
+              >
                 <ImageWithFallback src={img} alt={`${figure.name} ${idx + 1}`} className="w-full h-full object-cover" />
                 {primaryIdx === idx && (
                   <div className="absolute top-0.5 right-0.5 w-4 h-4 rounded-full bg-[#9CFF49] flex items-center justify-center">
@@ -163,8 +280,10 @@ export function FigureDetailPage() {
                 )}
               </button>
             ))}
-            <button onClick={handleAddImage}
-              className="w-16 h-16 rounded-lg border-2 border-dashed border-border hover:border-[#9CFF49]/40 flex items-center justify-center shrink-0 text-muted-foreground hover:text-foreground transition-colors outline-none focus-visible:ring-2 focus-visible:ring-[#9CFF49]/50">
+            <button
+              onClick={handleAddImage}
+              className="w-16 h-16 rounded-lg border-2 border-dashed border-border hover:border-[#9CFF49]/40 flex items-center justify-center shrink-0 text-muted-foreground hover:text-foreground transition-colors outline-none focus-visible:ring-2 focus-visible:ring-[#9CFF49]/50"
+            >
               <ImagePlus className="w-5 h-5" />
             </button>
           </div>
@@ -174,9 +293,15 @@ export function FigureDetailPage() {
               {images.map((_, idx) => (
                 <div key={idx} className="flex items-center gap-1.5 px-2 py-1 rounded-md bg-secondary/50 border border-border">
                   <GripVertical className="w-3 h-3 text-muted-foreground cursor-grab" />
-                  <span className="text-muted-foreground" style={{ fontSize: "0.7rem" }}>Foto {idx + 1}</span>
+                  <span className="text-muted-foreground" style={{ fontSize: "0.7rem" }}>
+                    Foto {idx + 1}
+                  </span>
                   {primaryIdx !== idx ? (
-                    <button onClick={() => handleSetPrimary(idx)} className="text-muted-foreground hover:text-[#9CFF49] transition-colors" title="Marcar como principal">
+                    <button
+                      onClick={() => handleSetPrimary(idx)}
+                      className="text-muted-foreground hover:text-[#9CFF49] transition-colors"
+                      title="Marcar como principal"
+                    >
                       <Star className="w-3 h-3" />
                     </button>
                   ) : (
@@ -197,28 +322,48 @@ export function FigureDetailPage() {
         <div className="space-y-4">
           <Card className="bg-card border-border">
             <CardContent className="p-4">
-              <p className="text-muted-foreground mb-3" style={{ fontSize: "0.7rem" }}>BLOQUE FINANCIERO</p>
+              <p className="text-muted-foreground mb-3" style={{ fontSize: "0.7rem" }}>
+                BLOQUE FINANCIERO
+              </p>
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <p className="text-muted-foreground" style={{ fontSize: "0.65rem" }}>Precio compra</p>
-                  <p className="text-foreground" style={{ fontSize: "1.2rem" }}>{figure.purchasePrice}&euro;</p>
-                </div>
-                <div>
-                  <p className="text-muted-foreground" style={{ fontSize: "0.65rem" }}>Valor estimado</p>
-                  <p className="text-foreground" style={{ fontSize: "1.2rem" }}>{figure.currentValue}&euro;</p>
-                </div>
-                <div>
-                  <p className="text-muted-foreground" style={{ fontSize: "0.65rem" }}>Diferencia</p>
-                  <p className={priceDiff >= 0 ? "text-[#9CFF49]" : "text-red-400"} style={{ fontSize: "1.2rem" }}>
-                    {priceDiff >= 0 ? "+" : ""}{priceDiff}&euro;
+                  <p className="text-muted-foreground" style={{ fontSize: "0.65rem" }}>
+                    Precio compra
+                  </p>
+                  <p className="text-foreground" style={{ fontSize: "1.2rem" }}>
+                    {figure.purchasePrice}&euro;
                   </p>
                 </div>
                 <div>
-                  <p className="text-muted-foreground" style={{ fontSize: "0.65rem" }}>Variacion</p>
+                  <p className="text-muted-foreground" style={{ fontSize: "0.65rem" }}>
+                    Valor estimado
+                  </p>
+                  <p className="text-foreground" style={{ fontSize: "1.2rem" }}>
+                    {figure.currentValue}&euro;
+                  </p>
+                </div>
+                <div>
+                  <p className="text-muted-foreground" style={{ fontSize: "0.65rem" }}>
+                    Diferencia
+                  </p>
+                  <p className={priceDiff >= 0 ? "text-[#9CFF49]" : "text-red-400"} style={{ fontSize: "1.2rem" }}>
+                    {priceDiff >= 0 ? "+" : ""}
+                    {priceDiff}&euro;
+                  </p>
+                </div>
+                <div>
+                  <p className="text-muted-foreground" style={{ fontSize: "0.65rem" }}>
+                    Variacion
+                  </p>
                   <div className="flex items-center gap-1">
-                    {priceDiff >= 0 ? <TrendingUp className="w-4 h-4 text-[#9CFF49]" /> : <TrendingDown className="w-4 h-4 text-red-400" />}
+                    {priceDiff >= 0 ? (
+                      <TrendingUp className="w-4 h-4 text-[#9CFF49]" />
+                    ) : (
+                      <TrendingDown className="w-4 h-4 text-red-400" />
+                    )}
                     <p className={priceDiff >= 0 ? "text-[#9CFF49]" : "text-red-400"} style={{ fontSize: "1.2rem" }}>
-                      {priceDiff >= 0 ? "+" : ""}{pricePercent}%
+                      {priceDiff >= 0 ? "+" : ""}
+                      {pricePercent}%
                     </p>
                   </div>
                 </div>
@@ -228,15 +373,23 @@ export function FigureDetailPage() {
 
           <Card className="bg-card border-border">
             <CardContent className="p-4 space-y-3">
-              <p className="text-muted-foreground" style={{ fontSize: "0.7rem" }}>CONTEXTO DE MERCADO</p>
+              <p className="text-muted-foreground" style={{ fontSize: "0.7rem" }}>
+                CONTEXTO DE MERCADO
+              </p>
               <div className="grid grid-cols-2 gap-2">
                 {externalPrices.map((ep) => (
                   <div key={ep.source} className="flex items-center justify-between p-2.5 rounded-lg bg-secondary/30">
                     <div>
-                      <p className="text-foreground" style={{ fontSize: "0.8rem" }}>{ep.source}</p>
-                      <p className="text-muted-foreground" style={{ fontSize: "0.6rem" }}>{ep.condition}</p>
+                      <p className="text-foreground" style={{ fontSize: "0.8rem" }}>
+                        {ep.source}
+                      </p>
+                      <p className="text-muted-foreground" style={{ fontSize: "0.6rem" }}>
+                        {ep.condition}
+                      </p>
                     </div>
-                    <p className="text-foreground" style={{ fontSize: "0.9rem" }}>{ep.price}&euro;</p>
+                    <p className="text-foreground" style={{ fontSize: "0.9rem" }}>
+                      {ep.price}&euro;
+                    </p>
                   </div>
                 ))}
               </div>
@@ -251,18 +404,103 @@ export function FigureDetailPage() {
 
           <Card className="bg-card border-border">
             <CardContent className="p-4">
-              <p className="text-muted-foreground mb-3" style={{ fontSize: "0.7rem" }}>DETALLES</p>
-              <div className="grid grid-cols-2 gap-y-1.5 gap-x-3" style={{ fontSize: "0.8rem" }}>
-                <div><span className="text-muted-foreground">Personaje:</span> <span className="text-foreground ml-1">{figure.character}</span></div>
-                <div><span className="text-muted-foreground">Marca:</span> <span className="text-foreground ml-1">{figure.brand}</span></div>
-                <div><span className="text-muted-foreground">Linea:</span> <span className="text-foreground ml-1">{figure.line}</span></div>
-                <div><span className="text-muted-foreground">Ano:</span> <span className="text-foreground ml-1">{figure.year}</span></div>
-                <div><span className="text-muted-foreground">Escala:</span> <span className="text-foreground ml-1">{figure.scale}</span></div>
-                <div><span className="text-muted-foreground">Material:</span> <span className="text-foreground ml-1">{figure.material}</span></div>
-                <div><span className="text-muted-foreground">Ubicacion:</span> <span className="text-foreground ml-1">{figure.location || "Sin asignar"}</span></div>
-                <div className="col-span-2"><span className="text-muted-foreground">Accesorios:</span> <span className="text-foreground ml-1">{figure.accessories}</span></div>
+              <p className="text-muted-foreground mb-3" style={{ fontSize: "0.7rem" }}>
+                DETALLES
+              </p>
+
+              {/* NEW: EAN-13 block (also shown in detail view) */}
+              <div className="mb-4 space-y-1.5">
+                <div className="flex items-center justify-between gap-2">
+                  <Label style={{ fontSize: "0.75rem" }} className="text-muted-foreground">
+                    Codigo de barras (EAN-13)
+                  </Label>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="h-7 px-2 text-[#9CFF49] disabled:opacity-50"
+                    disabled={eanLoading || ean13.replace(/\D/g, "").length !== 13}
+                    onClick={() => handleAutofillByEan(ean13)}
+                    style={{ fontSize: "0.7rem" }}
+                  >
+                    {eanLoading ? (
+                      <>
+                        <Loader2 className="w-3 h-3 animate-spin mr-1" /> Autocompletando...
+                      </>
+                    ) : (
+                      <>
+                        <Sparkles className="w-3 h-3 mr-1" /> Autocompletar
+                      </>
+                    )}
+                  </Button>
+                </div>
+
+                <Input
+                  value={ean13}
+                  onChange={(e) => {
+                    const cleaned = e.target.value.replace(/\D/g, "").slice(0, 13);
+                    setEan13(cleaned);
+                    setEanError("");
+                  }}
+                  onBlur={() => {
+                    const cleaned = ean13.replace(/\D/g, "").slice(0, 13);
+                    if (cleaned.length === 13) handleAutofillByEan(cleaned);
+                  }}
+                  inputMode="numeric"
+                  autoComplete="off"
+                  placeholder="Ej: 1234567890123"
+                  className={`bg-secondary/50 ${eanError ? "border-red-400/60" : ""}`}
+                />
+
+                <p className="text-muted-foreground" style={{ fontSize: "0.65rem" }}>
+                  Escribe o pega el EAN-13 en desktop para <span className="text-foreground">rellenar automaticamente</span> los datos del bloque DETALLES.
+                </p>
+
+                {eanError && (
+                  <p className="text-red-400 flex items-center gap-1" style={{ fontSize: "0.7rem" }}>
+                    <AlertCircle className="w-3 h-3" /> {eanError}
+                  </p>
+                )}
               </div>
-              <p className="text-muted-foreground mt-3" style={{ fontSize: "0.8rem" }}>{figure.description}</p>
+
+              <div className="grid grid-cols-2 gap-y-1.5 gap-x-3" style={{ fontSize: "0.8rem" }}>
+                <div>
+                  <span className="text-muted-foreground">Personaje:</span>{" "}
+                  <span className="text-foreground ml-1">{displayCharacter}</span>
+                </div>
+                <div>
+                  <span className="text-muted-foreground">Marca:</span>{" "}
+                  <span className="text-foreground ml-1">{displayBrand}</span>
+                </div>
+                <div>
+                  <span className="text-muted-foreground">Linea:</span>{" "}
+                  <span className="text-foreground ml-1">{displayLine}</span>
+                </div>
+                <div>
+                  <span className="text-muted-foreground">Ano:</span>{" "}
+                  <span className="text-foreground ml-1">{displayYear}</span>
+                </div>
+                <div>
+                  <span className="text-muted-foreground">Escala:</span>{" "}
+                  <span className="text-foreground ml-1">{displayScale}</span>
+                </div>
+                <div>
+                  <span className="text-muted-foreground">Material:</span>{" "}
+                  <span className="text-foreground ml-1">{displayMaterial}</span>
+                </div>
+                <div>
+                  <span className="text-muted-foreground">Ubicacion:</span>{" "}
+                  <span className="text-foreground ml-1">{displayLocation || "Sin asignar"}</span>
+                </div>
+                <div className="col-span-2">
+                  <span className="text-muted-foreground">Accesorios:</span>{" "}
+                  <span className="text-foreground ml-1">{displayAccessories}</span>
+                </div>
+              </div>
+
+              <p className="text-muted-foreground mt-3" style={{ fontSize: "0.8rem" }}>
+                {displayDescription}
+              </p>
             </CardContent>
           </Card>
         </div>
@@ -273,7 +511,9 @@ export function FigureDetailPage() {
         <AccordionItem value="chart" className="border-0">
           <Card className="bg-card border-border">
             <AccordionTrigger className="px-4 py-3 hover:no-underline">
-              <span className="text-foreground" style={{ fontSize: "0.85rem" }}>Evolucion de Precio (12 meses)</span>
+              <span className="text-foreground" style={{ fontSize: "0.85rem" }}>
+                Evolucion de Precio (12 meses)
+              </span>
             </AccordionTrigger>
             <AccordionContent className="px-4 pb-4">
               <PriceChart data={figure.priceHistory} height={200} />
@@ -287,8 +527,12 @@ export function FigureDetailPage() {
         <CardContent className="p-5 space-y-4">
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-foreground" style={{ fontSize: "0.9rem" }}>Vender esta figura</p>
-              <p className="text-muted-foreground" style={{ fontSize: "0.7rem" }}>Activa para crear un anuncio de venta</p>
+              <p className="text-foreground" style={{ fontSize: "0.9rem" }}>
+                Vender esta figura
+              </p>
+              <p className="text-muted-foreground" style={{ fontSize: "0.7rem" }}>
+                Activa para crear un anuncio de venta
+              </p>
             </div>
             <Switch
               checked={sellEnabled}
@@ -304,49 +548,87 @@ export function FigureDetailPage() {
             <div className="space-y-4 pt-2 border-t border-border">
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                 <div>
-                  <Label style={{ fontSize: "0.75rem" }} className="text-muted-foreground mb-1.5 block">Precio venta</Label>
-                  <Input type="number" value={sellPrice} onChange={(e) => setSellPrice(e.target.value)} placeholder={`${suggestedPrice}`} className="bg-secondary/50" />
-                  <p className="text-muted-foreground mt-1" style={{ fontSize: "0.6rem" }}>Sugerido: {suggestedPrice}&euro;</p>
+                  <Label style={{ fontSize: "0.75rem" }} className="text-muted-foreground mb-1.5 block">
+                    Precio venta
+                  </Label>
+                  <Input
+                    type="number"
+                    value={sellPrice}
+                    onChange={(e) => setSellPrice(e.target.value)}
+                    placeholder={`${suggestedPrice}`}
+                    className="bg-secondary/50"
+                  />
+                  <p className="text-muted-foreground mt-1" style={{ fontSize: "0.6rem" }}>
+                    Sugerido: {suggestedPrice}&euro;
+                  </p>
                 </div>
                 <div>
-                  <Label style={{ fontSize: "0.75rem" }} className="text-muted-foreground mb-1.5 block">Estado</Label>
+                  <Label style={{ fontSize: "0.75rem" }} className="text-muted-foreground mb-1.5 block">
+                    Estado
+                  </Label>
                   <Select value={sellCondition} onValueChange={setSellCondition}>
-                    <SelectTrigger className="bg-secondary/50"><SelectValue /></SelectTrigger>
+                    <SelectTrigger className="bg-secondary/50">
+                      <SelectValue />
+                    </SelectTrigger>
                     <SelectContent>
-                      {Object.entries(CONDITION_LABELS).map(([k, v]) => <SelectItem key={k} value={k}>{v}</SelectItem>)}
+                      {Object.entries(CONDITION_LABELS).map(([k, v]) => (
+                        <SelectItem key={k} value={k}>
+                          {v}
+                        </SelectItem>
+                      ))}
                     </SelectContent>
                   </Select>
                 </div>
                 <div>
-                  <Label style={{ fontSize: "0.75rem" }} className="text-muted-foreground mb-1.5 block">Categoria</Label>
+                  <Label style={{ fontSize: "0.75rem" }} className="text-muted-foreground mb-1.5 block">
+                    Categoria
+                  </Label>
                   <div className="h-9 px-3 flex items-center rounded-md bg-secondary/50 border border-border">
-                    <span className="text-foreground" style={{ fontSize: "0.85rem" }}>{figure.category}</span>
+                    <span className="text-foreground" style={{ fontSize: "0.85rem" }}>
+                      {figure.category}
+                    </span>
                   </div>
                 </div>
               </div>
 
               <div>
                 <div className="flex items-center justify-between mb-1.5">
-                  <Label style={{ fontSize: "0.75rem" }} className="text-muted-foreground">Descripcion del anuncio</Label>
-                  <Button variant="ghost" size="sm" onClick={handleGenerateAd}
-                    className="text-[#9CFF49] hover:text-[#9CFF49] gap-1" style={{ fontSize: "0.7rem" }}>
+                  <Label style={{ fontSize: "0.75rem" }} className="text-muted-foreground">
+                    Descripcion del anuncio
+                  </Label>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={handleGenerateAd}
+                    className="text-[#9CFF49] hover:text-[#9CFF49] gap-1"
+                    style={{ fontSize: "0.7rem" }}
+                  >
                     <Sparkles className="w-3 h-3" /> Generar con IA
                   </Button>
                 </div>
-                <Textarea value={sellDescription} onChange={(e) => setSellDescription(e.target.value)}
+                <Textarea
+                  value={sellDescription}
+                  onChange={(e) => setSellDescription(e.target.value)}
                   placeholder="Describe tu figura para los compradores..."
-                  className="bg-secondary/50 min-h-[120px]" style={{ fontSize: "0.85rem" }} />
+                  className="bg-secondary/50 min-h-[120px]"
+                  style={{ fontSize: "0.85rem" }}
+                />
               </div>
 
               {images.length > 0 && (
                 <div>
-                  <Label style={{ fontSize: "0.75rem" }} className="text-muted-foreground mb-1.5 block">Fotos del anuncio</Label>
+                  <Label style={{ fontSize: "0.75rem" }} className="text-muted-foreground mb-1.5 block">
+                    Fotos del anuncio
+                  </Label>
                   <div className="flex gap-2 flex-wrap">
                     {images.map((img, idx) => (
-                      <button key={idx} onClick={() => toggleSellImage(idx)}
+                      <button
+                        key={idx}
+                        onClick={() => toggleSellImage(idx)}
                         className={`relative w-14 h-14 rounded-lg overflow-hidden border-2 transition-colors outline-none focus-visible:ring-2 focus-visible:ring-[#9CFF49]/50 ${
                           selectedSellImages.includes(idx) ? "border-[#9CFF49]" : "border-border"
-                        }`}>
+                        }`}
+                      >
                         <ImageWithFallback src={img} alt={`Sell ${idx + 1}`} className="w-full h-full object-cover" />
                         {selectedSellImages.includes(idx) && (
                           <div className="absolute inset-0 bg-[#9CFF49]/20 flex items-center justify-center">
@@ -359,9 +641,11 @@ export function FigureDetailPage() {
                 </div>
               )}
 
-              <Button onClick={handlePublish}
+              <Button
+                onClick={handlePublish}
                 className="w-full bg-[#9CFF49] text-[#0a0a0a] hover:bg-[#8ae63e] active:bg-[#7dd635] disabled:opacity-40 disabled:cursor-not-allowed"
-                disabled={!sellPrice}>
+                disabled={!sellPrice}
+              >
                 Publicar anuncio
               </Button>
             </div>

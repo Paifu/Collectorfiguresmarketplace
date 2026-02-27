@@ -39,6 +39,11 @@ export function AddFigurePage() {
   const [category, setCategory] = useState("");
   const [purchasePrice, setPurchasePrice] = useState("");
 
+  // NEW: EAN-13 (barcode)
+  const [ean13, setEan13] = useState("");
+  const [eanLoading, setEanLoading] = useState(false);
+  const [eanError, setEanError] = useState("");
+
   // Optional fields (collapsed)
   const [description, setDescription] = useState("");
   const [subline, setSubline] = useState("");
@@ -89,9 +94,59 @@ export function AddFigurePage() {
     setMaterial(r.material);
     setUpc(r.upc);
     setCategory(r.category);
+
+    // NEW: si el resultado trae UPC/EAN, lo mostramos también en el campo EAN-13
+    if (r.upc) {
+      const digits = String(r.upc).replace(/\D/g, "").slice(0, 13);
+      if (digits.length === 13) setEan13(digits);
+    }
+
     setShowSuggestions(false);
     setErrors({});
     toast.success("Datos autocompletados");
+  };
+
+  // NEW: Autocompletar por EAN-13 usando el buscador actual
+  const handleAutofillByEan = (ean: string) => {
+    const cleaned = ean.replace(/\D/g, "").slice(0, 13);
+
+    if (cleaned.length === 0) {
+      setEanError("");
+      return;
+    }
+
+    if (cleaned.length !== 13) {
+      setEanError("El EAN-13 debe tener 13 dígitos.");
+      return;
+    }
+
+    setEanLoading(true);
+    setEanError("");
+
+    // Usamos tu searchAutocomplete existente (en tu mock-data suele devolver coincidencias por texto)
+    // Si el dataset indexa UPC/EAN, esto autocompleta sin tocar backend.
+    setTimeout(() => {
+      try {
+        const results = searchAutocomplete(cleaned);
+
+        if (results && results.length > 0) {
+          // Autocompleta con el primer resultado
+          applyAutocomplete(results[0]);
+
+          // Guardamos también en el UPC opcional para consistencia
+          setUpc(cleaned);
+
+          toast.success("Autocompletado por EAN-13", {
+            description: "Revisa los campos y ajusta si hace falta.",
+          });
+        } else {
+          setEanError("No se encontraron datos para ese EAN-13. Puedes completar manualmente.");
+          toast.error("No se encontró coincidencia por EAN-13");
+        }
+      } finally {
+        setEanLoading(false);
+      }
+    }, 350);
   };
 
   const applyAIData = (data: Partial<any>) => {
@@ -205,7 +260,7 @@ export function AddFigurePage() {
       material: material.trim() || "PVC",
       articulation: articulation.trim() || "Estandar",
       accessories: accessories.trim() || "No especificados",
-      upc: upc.trim() || undefined,
+      upc: (upc.trim() || ean13.trim()) ? (upc.trim() || ean13.trim()) : undefined,
       purchasePrice: price,
       currentValue: estimatedValue,
       category,
@@ -351,6 +406,60 @@ export function AddFigurePage() {
       <Card className="bg-card border-border">
         <CardContent className="p-4 space-y-3.5">
           <p className="text-foreground" style={{ fontSize: "0.85rem" }}>Datos basicos</p>
+
+          {/* NEW: EAN-13 input (autofill) */}
+          <div className="space-y-1.5">
+            <div className="flex items-center justify-between gap-2">
+              <Label style={{ fontSize: "0.8rem" }}>Codigo de barras (EAN-13)</Label>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="h-7 px-2 text-[#9CFF49] disabled:opacity-50"
+                disabled={eanLoading || ean13.replace(/\D/g, "").length !== 13}
+                onClick={() => handleAutofillByEan(ean13)}
+                style={{ fontSize: "0.7rem" }}
+              >
+                {eanLoading ? (
+                  <>
+                    <Loader2 className="w-3 h-3 animate-spin mr-1" /> Autocompletando...
+                  </>
+                ) : (
+                  <>
+                    <Sparkles className="w-3 h-3 mr-1" /> Autocompletar
+                  </>
+                )}
+              </Button>
+            </div>
+
+            <Input
+              value={ean13}
+              onChange={(e) => {
+                const cleaned = e.target.value.replace(/\D/g, "").slice(0, 13);
+                setEan13(cleaned);
+                setEanError("");
+              }}
+              onBlur={() => {
+                // Desktop friendly: al salir del input, si hay 13 dígitos, intentamos autocompletar
+                const cleaned = ean13.replace(/\D/g, "").slice(0, 13);
+                if (cleaned.length === 13) handleAutofillByEan(cleaned);
+              }}
+              inputMode="numeric"
+              autoComplete="off"
+              placeholder="Ej: 1234567890123"
+              className={`bg-secondary/50 ${eanError ? "border-red-400/60" : ""}`}
+            />
+
+            <p className="text-muted-foreground" style={{ fontSize: "0.7rem" }}>
+              Escribe o pega el EAN-13 en desktop para <span className="text-foreground">rellenar automaticamente</span> nombre, marca, linea, ano, etc.
+            </p>
+
+            {eanError && (
+              <p className="text-red-400 flex items-center gap-1" style={{ fontSize: "0.7rem" }}>
+                <AlertCircle className="w-3 h-3" /> {eanError}
+              </p>
+            )}
+          </div>
 
           {/* Name with autocomplete */}
           <div className="space-y-1.5 relative">

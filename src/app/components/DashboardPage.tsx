@@ -14,6 +14,7 @@ import {
   Heart,
   UserPlus,
   Package,
+  Store, // ✅ FIX: faltaba este import
 } from "lucide-react";
 import { ImageWithFallback } from "./figma/ImageWithFallback";
 
@@ -71,7 +72,7 @@ export function DashboardPage() {
   const navigate = useNavigate();
   const location = useLocation();
 
-  const { figures, categories } = useCollection();
+  const { figures } = useCollection();
 
   // HERO tabs
   const [tab, setTab] = useState<DiscoverTab>("forYou");
@@ -107,11 +108,10 @@ export function DashboardPage() {
   const totalFigures = figures.length;
 
   const totalValue = useMemo(() => {
-    return figures.reduce((sum, f) => sum + (Number(f.currentValue) || 0), 0);
+    return figures.reduce((sum, f: any) => sum + (Number(f.currentValue) || 0), 0);
   }, [figures]);
 
-  // “Requieren acción”: MVP simple (sin backend):
-  // - precio compra 0 OR falta categoría OR sin imágenes
+  // “Requieren acción”: MVP simple (sin backend)
   const needAction = useMemo(() => {
     return figures.filter((f: any) => {
       const noPrice = !f.purchasePrice || Number(f.purchasePrice) === 0;
@@ -122,7 +122,6 @@ export function DashboardPage() {
   }, [figures]);
 
   const recentlyAdded = useMemo(() => {
-    // Si hay addedAt, ordenamos por fecha. Si no, por el orden del array (últimos al final)
     const copy = [...figures];
     copy.sort((a: any, b: any) => {
       const da = a.addedAt ? new Date(a.addedAt).getTime() : 0;
@@ -134,7 +133,6 @@ export function DashboardPage() {
 
   // Marketplace (para Discover)
   const listings = useMemo(() => {
-    // Normalizamos lo que venga de MOCK_MARKET_LISTINGS
     return (MOCK_MARKET_LISTINGS as any[]).map((l) => ({
       ...l,
       _isNew: isNewListing(l.id),
@@ -151,7 +149,6 @@ export function DashboardPage() {
   }, [listings]);
 
   const news = useMemo(() => {
-    // primero las "new", luego por ventas
     return [...listings]
       .sort((a, b) => {
         const an = a._isNew ? 1 : 0;
@@ -176,15 +173,10 @@ export function DashboardPage() {
       .slice(0, 12);
   }, [followed, listings]);
 
-  // Scroll-to-categories behavior (si ya lo usabas)
   useEffect(() => {
-    // tu Layout hace navigate("/dashboard", { state: { scrollToCategories: true } })
-    // aquí lo puedes aprovechar si tienes una sección categorías (MVP no la meto para no romper)
-    // Dejo el hook listo por si quieres usarlo después.
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const s = (location.state as any) || {};
     if (s?.scrollToCategories) {
-      // noop por ahora
+      // reservado por si lo usas más adelante
     }
   }, [location.state]);
 
@@ -223,7 +215,6 @@ export function DashboardPage() {
     if (tab === "forYou") {
       return (
         <div className="space-y-3">
-          {/* Si NO sigue nada: sugerencias */}
           {followed.length === 0 ? (
             <Card className="bg-card border-border">
               <CardContent className="p-4">
@@ -271,7 +262,6 @@ export function DashboardPage() {
             </Card>
           ) : (
             <>
-              {/* Header */}
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-foreground" style={{ fontSize: "0.95rem" }}>Para ti</p>
@@ -284,7 +274,6 @@ export function DashboardPage() {
                 </Button>
               </div>
 
-              {/* Chips de seguidos */}
               <div className="flex gap-2 overflow-x-auto pb-1">
                 {FOLLOW_TOPICS.map((t) => {
                   const isOn = followed.includes(t.id);
@@ -303,7 +292,6 @@ export function DashboardPage() {
                 })}
               </div>
 
-              {/* Grid / carrusel */}
               {forYou.length === 0 ? (
                 <Card className="bg-card border-border">
                   <CardContent className="p-4">
@@ -347,7 +335,6 @@ export function DashboardPage() {
             </Button>
           </div>
 
-          {/* Top 3 destacado */}
           <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
             {top10.slice(0, 3).map((l, idx) => (
               <button
@@ -377,7 +364,6 @@ export function DashboardPage() {
             ))}
           </div>
 
-          {/* Resto top */}
           <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
             {top10.slice(3, 10).map(renderListingCard)}
           </div>
@@ -391,7 +377,6 @@ export function DashboardPage() {
       );
     }
 
-    // tab === "new"
     return (
       <div className="space-y-3">
         <div className="flex items-center justify-between">
@@ -421,7 +406,6 @@ export function DashboardPage() {
 
   return (
     <div className="p-4 md:p-8 max-w-6xl mx-auto space-y-6">
-      {/* HERO: Discover */}
       <Card className="bg-card border-border">
         <CardContent className="p-4 md:p-5 space-y-4">
           <div className="flex items-start justify-between gap-3">
@@ -443,7 +427,6 @@ export function DashboardPage() {
             </Button>
           </div>
 
-          {/* Tabs */}
           <div className="flex gap-2 overflow-x-auto pb-1">
             <button
               onClick={() => setTab("forYou")}
@@ -484,7 +467,6 @@ export function DashboardPage() {
         </CardContent>
       </Card>
 
-      {/* Mi Colección */}
       <div className="space-y-3">
         <div className="flex items-center justify-between">
           <h2 className="text-foreground" style={{ fontSize: "1.2rem" }}>Mi Colección</h2>
@@ -536,7 +518,6 @@ export function DashboardPage() {
         </div>
       </div>
 
-      {/* Añadidos recientemente */}
       <div className="space-y-3">
         <div className="flex items-center justify-between">
           <h3 className="text-foreground" style={{ fontSize: "1.1rem" }}>Añadidos recientemente</h3>
@@ -592,7 +573,6 @@ export function DashboardPage() {
         )}
       </div>
 
-      {/* CTA suave: seguir + wishlist */}
       <Card className="bg-card border-border">
         <CardContent className="p-4 flex items-center justify-between gap-3">
           <div>

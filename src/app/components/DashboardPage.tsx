@@ -1,423 +1,618 @@
-import { useState, useEffect } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useLocation } from "react-router";
-import { MOCK_REVIEW_ITEMS, CONDITION_LABELS } from "../lib/mock-data";
-import { useCollection } from "../lib/collection-store";
-import { Button } from "./ui/button";
-import { Badge } from "./ui/badge";
 import { Card, CardContent } from "./ui/card";
-import { Input } from "./ui/input";
-import { Progress } from "./ui/progress";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "./ui/dialog";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./ui/select";
-import { Package, AlertTriangle, TrendingUp, ChevronRight, Pencil, X, Plus, EyeOff, Sparkles, MapPin, Copy, FileText, ArrowRight } from "lucide-react";
+import { Badge } from "./ui/badge";
+import { Button } from "./ui/button";
+import { useCollection } from "../lib/collection-store";
+import { MOCK_MARKET_LISTINGS } from "../lib/mock-data";
+import {
+  ArrowRight,
+  TrendingUp,
+  Sparkles,
+  Flame,
+  Plus,
+  Heart,
+  UserPlus,
+  Package,
+} from "lucide-react";
 import { ImageWithFallback } from "./figma/ImageWithFallback";
-import { toast } from "sonner";
 
-type ResolveType = null | "missing_location" | "incomplete_data" | "duplicate" | "variant";
+/**
+ * Dashboard v2 (MVP):
+ * - HERO Discover con tabs: Para ti / Top ventas / Novedades
+ * - Seguimiento guardado en localStorage (sin tocar store)
+ */
+
+type DiscoverTab = "forYou" | "top" | "new";
+
+type FollowTopic = {
+  id: string;
+  label: string;
+  hint: string;
+  match: string[]; // keywords para filtrar listings
+};
+
+const FOLLOW_TOPICS: FollowTopic[] = [
+  { id: "shf", label: "S.H.Figuarts", hint: "Figuras y novedades SHF", match: ["figuarts", "s.h", "shf"] },
+  { id: "db", label: "Dragon Ball", hint: "Goku, Vegeta, saga DB", match: ["goku", "vegeta", "dragon ball", "db"] },
+  { id: "onepiece", label: "One Piece", hint: "Luffy, Zoro, etc.", match: ["luffy", "zoro", "one piece"] },
+  { id: "marvel", label: "Marvel", hint: "Spider-Man, Iron Man…", match: ["spider", "marvel", "iron", "venom"] },
+  { id: "neca", label: "NECA", hint: "NECA + cine/coleccionismo", match: ["neca"] },
+  { id: "mafex", label: "MAFEX", hint: "MAFEX / premium", match: ["mafex"] },
+];
+
+const LS_KEY = "sile_followed_topics_v1";
+
+/** Helpers: generamos métricas fake estables por id (sin backend) */
+function stableScoreFromId(id: string) {
+  let h = 0;
+  for (let i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) >>> 0;
+  return h;
+}
+
+function isNewListing(id: string) {
+  // ~40% "new"
+  return stableScoreFromId(id) % 10 < 4;
+}
+
+function weeklySales(id: string) {
+  // ventas "fake" 20..220
+  return 20 + (stableScoreFromId(id) % 201);
+}
+
+function normalize(s: string) {
+  return (s || "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/\p{Diacritic}/gu, "");
+}
 
 export function DashboardPage() {
   const navigate = useNavigate();
   const location = useLocation();
-  const { figures, categories, getCategoryStats, addCategory: addCategoryToStore } = useCollection();
-  const [editingCategory, setEditingCategory] = useState<string | null>(null);
-  const [newCatName, setNewCatName] = useState("");
-  const [showNewCat, setShowNewCat] = useState(false);
-  const [newCatInput, setNewCatInput] = useState("");
-  const [ignoredReviews, setIgnoredReviews] = useState<string[]>([]);
 
-  // Resolve flow state
-  const [resolveType, setResolveType] = useState<ResolveType>(null);
-  const [resolveItemId, setResolveItemId] = useState<string | null>(null);
-  const [resolveLocation, setResolveLocation] = useState("");
+  const { figures, categories } = useCollection();
 
-  const totalFigures = figures.length;
-  const totalValue = figures.reduce((sum, f) => sum + f.currentValue, 0);
-  const pendingReview = MOCK_REVIEW_ITEMS.filter((r) => !ignoredReviews.includes(r.id)).length;
+  // HERO tabs
+  const [tab, setTab] = useState<DiscoverTab>("forYou");
 
-  const figuresWithFullData = figures.filter((f) => f.location && f.upc && f.description).length;
-  const completeness = totalFigures > 0 ? Math.round((figuresWithFullData / totalFigures) * 100) : 0;
-
-  const categoryStats = getCategoryStats();
+  // Followed topics (localStorage)
+  const [followed, setFollowed] = useState<string[]>([]);
 
   useEffect(() => {
-    if ((location.state as any)?.scrollToCategories) {
-      const el = document.getElementById("categories-section");
-      el?.scrollIntoView({ behavior: "smooth" });
+    try {
+      const raw = localStorage.getItem(LS_KEY);
+      if (raw) setFollowed(JSON.parse(raw));
+      else setFollowed([]);
+    } catch {
+      setFollowed([]);
+    }
+  }, []);
+
+  const saveFollowed = (next: string[]) => {
+    setFollowed(next);
+    try {
+      localStorage.setItem(LS_KEY, JSON.stringify(next));
+    } catch {}
+  };
+
+  const toggleFollow = (topicId: string) => {
+    const next = followed.includes(topicId)
+      ? followed.filter((x) => x !== topicId)
+      : [...followed, topicId];
+    saveFollowed(next);
+  };
+
+  // Stats (Mi colección)
+  const totalFigures = figures.length;
+
+  const totalValue = useMemo(() => {
+    return figures.reduce((sum, f) => sum + (Number(f.currentValue) || 0), 0);
+  }, [figures]);
+
+  // “Requieren acción”: MVP simple (sin backend):
+  // - precio compra 0 OR falta categoría OR sin imágenes
+  const needAction = useMemo(() => {
+    return figures.filter((f: any) => {
+      const noPrice = !f.purchasePrice || Number(f.purchasePrice) === 0;
+      const noCat = !f.category;
+      const noImages = !f.images || (Array.isArray(f.images) && f.images.length === 0);
+      return noPrice || noCat || noImages;
+    }).length;
+  }, [figures]);
+
+  const recentlyAdded = useMemo(() => {
+    // Si hay addedAt, ordenamos por fecha. Si no, por el orden del array (últimos al final)
+    const copy = [...figures];
+    copy.sort((a: any, b: any) => {
+      const da = a.addedAt ? new Date(a.addedAt).getTime() : 0;
+      const db = b.addedAt ? new Date(b.addedAt).getTime() : 0;
+      return db - da;
+    });
+    return copy.slice(0, 6);
+  }, [figures]);
+
+  // Marketplace (para Discover)
+  const listings = useMemo(() => {
+    // Normalizamos lo que venga de MOCK_MARKET_LISTINGS
+    return (MOCK_MARKET_LISTINGS as any[]).map((l) => ({
+      ...l,
+      _isNew: isNewListing(l.id),
+      _weeklySales: weeklySales(l.id),
+      _title: l.name || l.title || l.listingName || "Figura",
+      _price: Number(l.price || l.listingPrice || 0),
+      _image: l.image || l.cover || l.listingImage || l.images?.[0] || "",
+      _condition: l.condition || "Completo",
+    }));
+  }, []);
+
+  const top10 = useMemo(() => {
+    return [...listings].sort((a, b) => b._weeklySales - a._weeklySales).slice(0, 10);
+  }, [listings]);
+
+  const news = useMemo(() => {
+    // primero las "new", luego por ventas
+    return [...listings]
+      .sort((a, b) => {
+        const an = a._isNew ? 1 : 0;
+        const bn = b._isNew ? 1 : 0;
+        if (bn !== an) return bn - an;
+        return b._weeklySales - a._weeklySales;
+      })
+      .slice(0, 12);
+  }, [listings]);
+
+  const forYou = useMemo(() => {
+    if (followed.length === 0) return [];
+    const topics = FOLLOW_TOPICS.filter((t) => followed.includes(t.id));
+    const keywords = topics.flatMap((t) => t.match).map(normalize);
+
+    return listings
+      .filter((l) => {
+        const title = normalize(l._title);
+        return keywords.some((k) => title.includes(k));
+      })
+      .sort((a, b) => (b._isNew ? 1 : 0) - (a._isNew ? 1 : 0) || b._weeklySales - a._weeklySales)
+      .slice(0, 12);
+  }, [followed, listings]);
+
+  // Scroll-to-categories behavior (si ya lo usabas)
+  useEffect(() => {
+    // tu Layout hace navigate("/dashboard", { state: { scrollToCategories: true } })
+    // aquí lo puedes aprovechar si tienes una sección categorías (MVP no la meto para no romper)
+    // Dejo el hook listo por si quieres usarlo después.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const s = (location.state as any) || {};
+    if (s?.scrollToCategories) {
+      // noop por ahora
     }
   }, [location.state]);
 
-  const addCategory = () => {
-    if (!newCatInput.trim()) return;
-    addCategoryToStore(newCatInput.trim());
-    setNewCatInput("");
-    setShowNewCat(false);
-  };
-
-  const stats = [
-    { label: "Figuras", value: totalFigures, icon: Package, color: "bg-[#9CFF49]/10 text-[#9CFF49]" },
-    { label: "Valor estimado", value: `${totalValue.toLocaleString("es-ES")}\u20AC`, icon: TrendingUp, color: "bg-emerald-500/10 text-emerald-400" },
-    { label: "Requieren accion", value: pendingReview, icon: AlertTriangle, color: "bg-amber-500/10 text-amber-400" },
-  ];
-
-  const issueTypeIcon = (type: string) => {
-    switch (type) {
-      case "variant": return <AlertTriangle className="w-3.5 h-3.5 text-amber-400" />;
-      case "missing_location": return <MapPin className="w-3.5 h-3.5 text-purple-400" />;
-      case "duplicate": return <Copy className="w-3.5 h-3.5 text-blue-400" />;
-      case "incomplete_data": return <FileText className="w-3.5 h-3.5 text-orange-400" />;
-      default: return <AlertTriangle className="w-3.5 h-3.5 text-amber-400" />;
-    }
-  };
-
-  const activeReviewItems = MOCK_REVIEW_ITEMS.filter((r) => !ignoredReviews.includes(r.id));
-  const criticalItems = activeReviewItems.filter((r) => r.severity === "critical");
-  const improvementItems = activeReviewItems.filter((r) => r.severity === "improvement");
-
-  const openResolve = (itemId: string, type: string) => {
-    setResolveItemId(itemId);
-    setResolveType(type as ResolveType);
-    setResolveLocation("");
-  };
-
-  const handleResolve = () => {
-    setIgnoredReviews((prev) => [...prev, resolveItemId!]);
-    setResolveType(null);
-    setResolveItemId(null);
-    toast.success("Problema resuelto correctamente");
-  };
-
-  const resolveItem = MOCK_REVIEW_ITEMS.find((r) => r.id === resolveItemId);
-
-  // Recently added: sorted by date descending
-  const recentFigures = [...figures].sort((a, b) => b.addedAt.localeCompare(a.addedAt)).slice(0, 5);
-
-  const renderReviewCard = (item: typeof MOCK_REVIEW_ITEMS[0], isCritical: boolean) => (
-    <Card key={item.id} className={`bg-card border-border border-l-2 ${isCritical ? "border-l-red-400/60 hover:border-l-red-400" : "border-l-blue-400/50 hover:border-l-blue-400"} transition-colors`}>
-      <CardContent className="p-3.5">
-        <div className="flex items-start gap-3">
-          <div className="w-12 h-12 rounded-lg overflow-hidden bg-secondary/30 shrink-0">
-            <ImageWithFallback src={item.image} alt={item.name} className="w-full h-full object-cover" />
-          </div>
-          <div className="flex-1 min-w-0">
-            <p className="text-foreground truncate" style={{ fontSize: "0.85rem" }}>{item.name}</p>
-            <div className="flex items-center gap-1.5 mt-0.5">
-              {issueTypeIcon(item.issueType)}
-              <p className="text-muted-foreground" style={{ fontSize: "0.7rem" }}>{item.issue}</p>
-            </div>
-            <p className="text-muted-foreground/70 mt-0.5" style={{ fontSize: "0.65rem" }}>{item.impact}</p>
-          </div>
+  const renderListingCard = (l: any) => (
+    <button
+      key={l.id}
+      onClick={() => navigate("/marketplace")}
+      className="text-left rounded-xl overflow-hidden border border-border bg-card hover:border-[#9CFF49]/30 transition-colors outline-none focus-visible:ring-2 focus-visible:ring-[#9CFF49]/50"
+    >
+      <div className="aspect-[4/3] bg-secondary/30">
+        <ImageWithFallback src={l._image} alt={l._title} className="w-full h-full object-cover" />
+      </div>
+      <div className="p-3">
+        <div className="flex items-start justify-between gap-2">
+          <p className="text-foreground line-clamp-2" style={{ fontSize: "0.85rem" }}>
+            {l._title}
+          </p>
+          <span className="text-[#9CFF49]" style={{ fontSize: "0.9rem" }}>
+            {l._price ? `${l._price}€` : "—"}
+          </span>
         </div>
-        <div className="flex items-center gap-2 mt-2.5 justify-end">
-          <button
-            className="px-2 py-1 rounded text-muted-foreground hover:text-foreground hover:bg-accent/50 transition-colors flex items-center gap-1 outline-none focus-visible:ring-2 focus-visible:ring-[#9CFF49]/50"
-            style={{ fontSize: "0.7rem" }}
-            onClick={() => { setIgnoredReviews((prev) => [...prev, item.id]); toast.info("Alerta ignorada"); }}
-          >
-            <EyeOff className="w-3 h-3" /> Ignorar
-          </button>
-          <Button
-            size="sm"
-            className={isCritical ? "bg-[#9CFF49] text-[#0a0a0a] hover:bg-[#8ae63e] active:bg-[#7dd635]" : "border-[#9CFF49]/30 text-[#9CFF49] hover:bg-[#9CFF49]/10"}
-            variant={isCritical ? "default" : "outline"}
-            style={{ fontSize: "0.75rem" }}
-            onClick={() => openResolve(item.id, item.issueType)}
-          >
-            Resolver
-          </Button>
+        <div className="flex items-center gap-2 mt-2">
+          {l._isNew && (
+            <Badge className="bg-[#9CFF49] text-[#0a0a0a] text-[0.55rem]">Nuevo</Badge>
+          )}
+          <Badge variant="secondary" className="text-[0.55rem]">{l._condition}</Badge>
+          <span className="text-muted-foreground" style={{ fontSize: "0.65rem" }}>
+            {l._weeklySales} ventas/sem
+          </span>
         </div>
-      </CardContent>
-    </Card>
+      </div>
+    </button>
   );
 
-  return (
-    <div className="p-4 md:p-8 max-w-7xl mx-auto space-y-7">
-      {/* ─── Mi Colección: KPIs compactos ─── */}
-      <div>
-        <h2 className="text-foreground mb-3">Mi Colección</h2>
-        <div className="grid grid-cols-3 gap-3">
-          {stats.map((s) => (
-            <Card key={s.label} className="bg-card border-border hover:border-[#9CFF49]/15 transition-colors">
-              <CardContent className="px-4 py-2.5">
-                <div className="flex items-center gap-2.5">
-                  <div className={`w-8 h-8 rounded-md flex items-center justify-center shrink-0 ${s.color}`}>
-                    <s.icon className="w-4 h-4" />
+  const renderDiscover = () => {
+    if (tab === "forYou") {
+      return (
+        <div className="space-y-3">
+          {/* Si NO sigue nada: sugerencias */}
+          {followed.length === 0 ? (
+            <Card className="bg-card border-border">
+              <CardContent className="p-4">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <p className="text-foreground" style={{ fontSize: "0.95rem" }}>
+                      Para ti (personaliza tu feed)
+                    </p>
+                    <p className="text-muted-foreground mt-1" style={{ fontSize: "0.75rem" }}>
+                      Sigue líneas o universos y verás aquí novedades y top ventas relacionadas.
+                    </p>
                   </div>
-                  <div className="min-w-0">
-                    <p className="text-muted-foreground" style={{ fontSize: "0.65rem" }}>{s.label}</p>
-                    <p className="text-foreground" style={{ fontSize: "1.1rem" }}>{s.value}</p>
-                  </div>
+                  <UserPlus className="w-5 h-5 text-[#9CFF49]" />
+                </div>
+
+                <div className="mt-3 flex gap-2 overflow-x-auto pb-1">
+                  {FOLLOW_TOPICS.map((t) => {
+                    const isOn = followed.includes(t.id);
+                    return (
+                      <button
+                        key={t.id}
+                        onClick={() => toggleFollow(t.id)}
+                        className={`shrink-0 px-3 py-2 rounded-lg border transition-colors ${
+                          isOn ? "border-[#9CFF49]/40 bg-[#9CFF49]/10 text-[#9CFF49]" : "border-border bg-secondary/20 text-foreground hover:bg-secondary/30"
+                        }`}
+                      >
+                        <p style={{ fontSize: "0.8rem" }} className="whitespace-nowrap">{t.label}</p>
+                        <p style={{ fontSize: "0.65rem" }} className="text-muted-foreground whitespace-nowrap">{t.hint}</p>
+                      </button>
+                    );
+                  })}
+                </div>
+
+                <div className="mt-4 flex items-center justify-between">
+                  <Button variant="outline" onClick={() => navigate("/marketplace")} className="gap-2">
+                    <Store className="w-4 h-4" />
+                    Ir al Marketplace
+                  </Button>
+                  <Button onClick={() => setTab("new")} className="gap-2 bg-[#9CFF49] text-[#0a0a0a] hover:bg-[#8ae63e]">
+                    <Sparkles className="w-4 h-4" />
+                    Ver Novedades
+                  </Button>
                 </div>
               </CardContent>
             </Card>
-          ))}
+          ) : (
+            <>
+              {/* Header */}
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-foreground" style={{ fontSize: "0.95rem" }}>Para ti</p>
+                  <p className="text-muted-foreground" style={{ fontSize: "0.75rem" }}>
+                    Novedades y tendencias en lo que sigues
+                  </p>
+                </div>
+                <Button variant="ghost" className="text-[#9CFF49]" onClick={() => setTab("top")}>
+                  Ver top <ArrowRight className="w-4 h-4 ml-1" />
+                </Button>
+              </div>
+
+              {/* Chips de seguidos */}
+              <div className="flex gap-2 overflow-x-auto pb-1">
+                {FOLLOW_TOPICS.map((t) => {
+                  const isOn = followed.includes(t.id);
+                  return (
+                    <button
+                      key={t.id}
+                      onClick={() => toggleFollow(t.id)}
+                      className={`shrink-0 px-3 py-1.5 rounded-full border transition-colors ${
+                        isOn ? "border-[#9CFF49]/40 bg-[#9CFF49]/10 text-[#9CFF49]" : "border-border bg-secondary/20 text-muted-foreground hover:text-foreground"
+                      }`}
+                      style={{ fontSize: "0.75rem" }}
+                    >
+                      {isOn ? "Siguiendo · " : ""}{t.label}
+                    </button>
+                  );
+                })}
+              </div>
+
+              {/* Grid / carrusel */}
+              {forYou.length === 0 ? (
+                <Card className="bg-card border-border">
+                  <CardContent className="p-4">
+                    <p className="text-foreground" style={{ fontSize: "0.85rem" }}>
+                      Aún no hay resultados para tus seguidos
+                    </p>
+                    <p className="text-muted-foreground mt-1" style={{ fontSize: "0.75rem" }}>
+                      Prueba a seguir otras líneas o ve a Novedades.
+                    </p>
+                    <div className="mt-3 flex gap-2">
+                      <Button variant="outline" onClick={() => setTab("new")}>Ver Novedades</Button>
+                      <Button className="bg-[#9CFF49] text-[#0a0a0a] hover:bg-[#8ae63e]" onClick={() => navigate("/marketplace")}>
+                        Ir a Marketplace
+                      </Button>
+                    </div>
+                  </CardContent>
+                </Card>
+              ) : (
+                <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+                  {forYou.slice(0, 8).map(renderListingCard)}
+                </div>
+              )}
+            </>
+          )}
+        </div>
+      );
+    }
+
+    if (tab === "top") {
+      return (
+        <div className="space-y-3">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-foreground" style={{ fontSize: "0.95rem" }}>Top ventas</p>
+              <p className="text-muted-foreground" style={{ fontSize: "0.75rem" }}>
+                Las más vendidas esta semana (prueba social + FOMO)
+              </p>
+            </div>
+            <Button variant="ghost" className="text-[#9CFF49]" onClick={() => setTab("new")}>
+              Ver novedades <ArrowRight className="w-4 h-4 ml-1" />
+            </Button>
+          </div>
+
+          {/* Top 3 destacado */}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+            {top10.slice(0, 3).map((l, idx) => (
+              <button
+                key={l.id}
+                onClick={() => navigate("/marketplace")}
+                className="text-left rounded-xl overflow-hidden border border-border bg-card hover:border-[#9CFF49]/30 transition-colors outline-none focus-visible:ring-2 focus-visible:ring-[#9CFF49]/50"
+              >
+                <div className="aspect-[16/9] bg-secondary/30 relative">
+                  <ImageWithFallback src={l._image} alt={l._title} className="w-full h-full object-cover" />
+                  <div className="absolute top-2 left-2 flex items-center gap-2">
+                    <Badge className="bg-[#9CFF49] text-[#0a0a0a] text-[0.55rem]">#{idx + 1}</Badge>
+                    <Badge variant="secondary" className="text-[0.55rem] flex items-center gap-1">
+                      <Flame className="w-3 h-3" /> Trending
+                    </Badge>
+                  </div>
+                </div>
+                <div className="p-3">
+                  <p className="text-foreground line-clamp-2" style={{ fontSize: "0.85rem" }}>{l._title}</p>
+                  <div className="flex items-center justify-between mt-2">
+                    <span className="text-[#9CFF49]" style={{ fontSize: "0.95rem" }}>{l._price ? `${l._price}€` : "—"}</span>
+                    <span className="text-muted-foreground flex items-center gap-1" style={{ fontSize: "0.7rem" }}>
+                      <TrendingUp className="w-4 h-4" /> {l._weeklySales}/sem
+                    </span>
+                  </div>
+                </div>
+              </button>
+            ))}
+          </div>
+
+          {/* Resto top */}
+          <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
+            {top10.slice(3, 10).map(renderListingCard)}
+          </div>
+
+          <div className="flex justify-end">
+            <Button onClick={() => navigate("/marketplace")} className="bg-[#9CFF49] text-[#0a0a0a] hover:bg-[#8ae63e]">
+              Ver todo el Marketplace <ArrowRight className="w-4 h-4 ml-1" />
+            </Button>
+          </div>
+        </div>
+      );
+    }
+
+    // tab === "new"
+    return (
+      <div className="space-y-3">
+        <div className="flex items-center justify-between">
+          <div>
+            <p className="text-foreground" style={{ fontSize: "0.95rem" }}>Novedades</p>
+            <p className="text-muted-foreground" style={{ fontSize: "0.75rem" }}>
+              Últimos lanzamientos y reposiciones (descubrimiento global)
+            </p>
+          </div>
+          <Button variant="ghost" className="text-[#9CFF49]" onClick={() => setTab("forYou")}>
+            Volver a Para ti <ArrowRight className="w-4 h-4 ml-1" />
+          </Button>
+        </div>
+
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+          {news.map(renderListingCard)}
+        </div>
+
+        <div className="flex justify-end">
+          <Button onClick={() => navigate("/marketplace")} className="bg-[#9CFF49] text-[#0a0a0a] hover:bg-[#8ae63e]">
+            Ir al Marketplace <ArrowRight className="w-4 h-4 ml-1" />
+          </Button>
+        </div>
+      </div>
+    );
+  };
+
+  return (
+    <div className="p-4 md:p-8 max-w-6xl mx-auto space-y-6">
+      {/* HERO: Discover */}
+      <Card className="bg-card border-border">
+        <CardContent className="p-4 md:p-5 space-y-4">
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0">
+              <p className="text-foreground" style={{ fontSize: "1rem" }}>
+                Descubre
+              </p>
+              <p className="text-muted-foreground" style={{ fontSize: "0.75rem" }}>
+                Recomendaciones, top ventas y novedades para empujarte a seguir o comprar
+              </p>
+            </div>
+            <Button
+              onClick={() => navigate("/marketplace")}
+              variant="outline"
+              className="gap-2 shrink-0"
+            >
+              <Store className="w-4 h-4" />
+              Marketplace
+            </Button>
+          </div>
+
+          {/* Tabs */}
+          <div className="flex gap-2 overflow-x-auto pb-1">
+            <button
+              onClick={() => setTab("forYou")}
+              className={`shrink-0 px-3 py-2 rounded-lg border transition-colors ${
+                tab === "forYou"
+                  ? "border-[#9CFF49]/40 bg-[#9CFF49]/10 text-[#9CFF49]"
+                  : "border-border bg-secondary/20 text-muted-foreground hover:text-foreground"
+              }`}
+              style={{ fontSize: "0.8rem" }}
+            >
+              Para ti
+            </button>
+            <button
+              onClick={() => setTab("top")}
+              className={`shrink-0 px-3 py-2 rounded-lg border transition-colors ${
+                tab === "top"
+                  ? "border-[#9CFF49]/40 bg-[#9CFF49]/10 text-[#9CFF49]"
+                  : "border-border bg-secondary/20 text-muted-foreground hover:text-foreground"
+              }`}
+              style={{ fontSize: "0.8rem" }}
+            >
+              🔥 Top ventas
+            </button>
+            <button
+              onClick={() => setTab("new")}
+              className={`shrink-0 px-3 py-2 rounded-lg border transition-colors ${
+                tab === "new"
+                  ? "border-[#9CFF49]/40 bg-[#9CFF49]/10 text-[#9CFF49]"
+                  : "border-border bg-secondary/20 text-muted-foreground hover:text-foreground"
+              }`}
+              style={{ fontSize: "0.8rem" }}
+            >
+              🆕 Novedades
+            </button>
+          </div>
+
+          {renderDiscover()}
+        </CardContent>
+      </Card>
+
+      {/* Mi Colección */}
+      <div className="space-y-3">
+        <div className="flex items-center justify-between">
+          <h2 className="text-foreground" style={{ fontSize: "1.2rem" }}>Mi Colección</h2>
+          <Button
+            onClick={() => navigate("/add")}
+            className="gap-2 bg-[#9CFF49] text-[#0a0a0a] hover:bg-[#8ae63e]"
+          >
+            <Plus className="w-4 h-4" />
+            Añadir
+          </Button>
+        </div>
+
+        <div className="grid grid-cols-3 gap-3">
+          <Card className="bg-card border-border">
+            <CardContent className="p-4">
+              <div className="flex items-center gap-2 mb-2">
+                <div className="w-9 h-9 rounded-lg bg-[#9CFF49]/10 flex items-center justify-center">
+                  <Package className="w-4 h-4 text-[#9CFF49]" />
+                </div>
+                <p className="text-muted-foreground" style={{ fontSize: "0.75rem" }}>Figuras</p>
+              </div>
+              <p className="text-foreground" style={{ fontSize: "1.35rem" }}>{totalFigures}</p>
+            </CardContent>
+          </Card>
+
+          <Card className="bg-card border-border">
+            <CardContent className="p-4">
+              <div className="flex items-center gap-2 mb-2">
+                <div className="w-9 h-9 rounded-lg bg-[#9CFF49]/10 flex items-center justify-center">
+                  <TrendingUp className="w-4 h-4 text-[#9CFF49]" />
+                </div>
+                <p className="text-muted-foreground" style={{ fontSize: "0.75rem" }}>Valor estimado</p>
+              </div>
+              <p className="text-foreground" style={{ fontSize: "1.35rem" }}>{Math.round(totalValue)}€</p>
+            </CardContent>
+          </Card>
+
+          <Card className="bg-card border-border">
+            <CardContent className="p-4">
+              <div className="flex items-center gap-2 mb-2">
+                <div className="w-9 h-9 rounded-lg bg-amber-500/10 flex items-center justify-center">
+                  <Sparkles className="w-4 h-4 text-amber-400" />
+                </div>
+                <p className="text-muted-foreground" style={{ fontSize: "0.75rem" }}>Requieren acción</p>
+              </div>
+              <p className="text-foreground" style={{ fontSize: "1.35rem" }}>{needAction}</p>
+            </CardContent>
+          </Card>
         </div>
       </div>
 
-      {/* ─── Añadidos Recientemente (protagonista) ─── */}
-      <div>
-        <div className="flex items-center justify-between mb-4">
-          <h2 className="text-foreground">Añadidos Recientemente</h2>
-          {recentFigures.length > 0 && (
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => navigate("/my-figures")}
-              className="text-muted-foreground gap-1 hover:text-[#9CFF49]"
-              style={{ fontSize: "0.8rem" }}
-            >
-              Ver todas <ArrowRight className="w-3.5 h-3.5" />
-            </Button>
-          )}
+      {/* Añadidos recientemente */}
+      <div className="space-y-3">
+        <div className="flex items-center justify-between">
+          <h3 className="text-foreground" style={{ fontSize: "1.1rem" }}>Añadidos recientemente</h3>
+          <Button variant="ghost" className="text-muted-foreground" onClick={() => navigate("/my-figures")}>
+            Ver todas <ArrowRight className="w-4 h-4 ml-1" />
+          </Button>
         </div>
-        {recentFigures.length > 0 ? (
-          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
-            {recentFigures.map((fig) => (
-              <Card key={fig.id}
-                className="bg-card border-border overflow-hidden cursor-pointer hover:border-[#9CFF49]/20 transition-all group"
-                onClick={() => navigate(`/figure/${fig.id}`)}>
-                <div className="aspect-[4/5] overflow-hidden bg-secondary/30">
-                  <ImageWithFallback src={fig.image} alt={fig.name}
-                    className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300" />
-                </div>
-                <CardContent className="p-3">
-                  <p className="text-foreground truncate" style={{ fontSize: "0.85rem" }}>{fig.name}</p>
-                  <p className="text-muted-foreground truncate mt-0.5" style={{ fontSize: "0.7rem" }}>{fig.brand} &middot; {fig.line}</p>
-                  <div className="flex items-center justify-between mt-1.5">
-                    <Badge variant="secondary" className="text-[0.6rem] px-1.5 py-0">
-                      {CONDITION_LABELS[fig.condition] || fig.condition}
-                    </Badge>
-                    <span className="text-[#9CFF49]" style={{ fontSize: "0.85rem" }}>{fig.currentValue}&euro;</span>
-                  </div>
-                </CardContent>
-              </Card>
-            ))}
-          </div>
-        ) : (
+
+        {recentlyAdded.length === 0 ? (
           <Card className="bg-card border-border">
-            <CardContent className="p-8 flex flex-col items-center justify-center text-center">
-              <Package className="w-10 h-10 text-muted-foreground/30 mb-2" />
-              <p className="text-foreground" style={{ fontSize: "0.9rem" }}>Aún no tienes figuras</p>
-              <p className="text-muted-foreground" style={{ fontSize: "0.75rem" }}>Añade tu primera figura para empezar</p>
+            <CardContent className="p-6 text-center">
+              <p className="text-muted-foreground" style={{ fontSize: "0.85rem" }}>
+                Aún no has añadido figuras. Empieza añadiendo tu primera figura.
+              </p>
               <Button
-                className="mt-3 bg-[#9CFF49] text-[#0a0a0a] hover:bg-[#8ae63e] gap-1.5"
-                size="sm"
                 onClick={() => navigate("/add")}
+                className="mt-4 bg-[#9CFF49] text-[#0a0a0a] hover:bg-[#8ae63e]"
               >
-                <Plus className="w-4 h-4" /> Añadir figura
+                Añadir figura
               </Button>
             </CardContent>
           </Card>
+        ) : (
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+            {recentlyAdded.slice(0, 4).map((f: any) => (
+              <button
+                key={f.id}
+                onClick={() => navigate(`/figure/${f.id}`)}
+                className="text-left rounded-2xl overflow-hidden border border-border bg-card hover:border-[#9CFF49]/30 transition-colors outline-none focus-visible:ring-2 focus-visible:ring-[#9CFF49]/50"
+              >
+                <div className="aspect-[4/5] bg-secondary/30">
+                  <ImageWithFallback src={f.image} alt={f.name} className="w-full h-full object-cover" />
+                </div>
+                <div className="p-3">
+                  <p className="text-foreground line-clamp-1" style={{ fontSize: "0.85rem" }}>
+                    {f.name}
+                  </p>
+                  <p className="text-muted-foreground line-clamp-1" style={{ fontSize: "0.7rem" }}>
+                    {f.brand} · {f.line}
+                  </p>
+                  <div className="flex items-center justify-between mt-2">
+                    <Badge variant="secondary" className="text-[0.55rem]">
+                      {f.conditionLabel || f.condition || "Estado"}
+                    </Badge>
+                    <span className="text-[#9CFF49]" style={{ fontSize: "0.85rem" }}>
+                      {f.currentValue ?? "—"}€
+                    </span>
+                  </div>
+                </div>
+              </button>
+            ))}
+          </div>
         )}
       </div>
 
-      {/* ─── Requieren Acción ─── */}
-      {activeReviewItems.length > 0 && (
-        <div>
-          <div className="mb-4">
-            <div className="flex items-center gap-2 mb-1">
-              <Sparkles className="w-4 h-4 text-[#9CFF49]" />
-              <h2 className="text-foreground">Requieren acción</h2>
-              <Badge variant="secondary" className="text-[0.6rem]">{activeReviewItems.length}</Badge>
-            </div>
-            <p className="text-muted-foreground" style={{ fontSize: "0.8rem" }}>
-              Completar estos datos mejora la valoración y búsqueda.
+      {/* CTA suave: seguir + wishlist */}
+      <Card className="bg-card border-border">
+        <CardContent className="p-4 flex items-center justify-between gap-3">
+          <div>
+            <p className="text-foreground" style={{ fontSize: "0.9rem" }}>Haz SILE más “tuyo”</p>
+            <p className="text-muted-foreground" style={{ fontSize: "0.75rem" }}>
+              Sigue líneas para ver novedades arriba y guardar deseos en Wishlist.
             </p>
           </div>
-
-          <Card className="bg-card border-border mb-4">
-            <CardContent className="p-4">
-              <div className="flex items-center justify-between mb-2">
-                <p className="text-muted-foreground" style={{ fontSize: "0.75rem" }}>Completitud de colección</p>
-                <p className="text-[#9CFF49]" style={{ fontSize: "0.8rem" }}>{completeness}%</p>
-              </div>
-              <Progress value={completeness} className="h-2 bg-secondary/50 [&>[data-slot=progress-indicator]]:bg-[#9CFF49]" />
-            </CardContent>
-          </Card>
-
-          {criticalItems.length > 0 && (
-            <div className="mb-3">
-              <div className="flex items-center gap-1.5 mb-2">
-                <div className="w-2 h-2 rounded-full bg-red-400" />
-                <p className="text-foreground" style={{ fontSize: "0.75rem" }}>Críticas &mdash; afectan al valor</p>
-              </div>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                {criticalItems.map((item) => renderReviewCard(item, true))}
-              </div>
-            </div>
-          )}
-
-          {improvementItems.length > 0 && (
-            <div>
-              <div className="flex items-center gap-1.5 mb-2">
-                <div className="w-2 h-2 rounded-full bg-blue-400" />
-                <p className="text-foreground" style={{ fontSize: "0.75rem" }}>Mejoras &mdash; datos opcionales</p>
-              </div>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                {improvementItems.map((item) => renderReviewCard(item, false))}
-              </div>
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* ─── Categorías (simplificadas) ─── */}
-      <div id="categories-section">
-        <div className="flex items-center justify-between mb-3">
-          <h2 className="text-foreground">Categorías</h2>
-          <Button variant="ghost" size="sm" onClick={() => setShowNewCat(true)} className="text-muted-foreground gap-1">
-            <Plus className="w-4 h-4" /> Nueva
-          </Button>
-        </div>
-        {showNewCat && (
-          <div className="flex gap-2 mb-3">
-            <Input placeholder="Nombre de categoría..." value={newCatInput}
-              onChange={(e) => setNewCatInput(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && addCategory()} className="h-9 max-w-xs" />
-            <Button size="sm" className="bg-[#9CFF49] text-[#0a0a0a] hover:bg-[#8ae63e]" onClick={addCategory}>Crear</Button>
-            <Button size="sm" variant="ghost" onClick={() => setShowNewCat(false)}><X className="w-4 h-4" /></Button>
+          <div className="flex gap-2">
+            <Button variant="outline" onClick={() => setTab("forYou")} className="gap-2">
+              <UserPlus className="w-4 h-4" />
+              Seguir
+            </Button>
+            <Button onClick={() => navigate("/wishlist")} className="gap-2 bg-[#9CFF49] text-[#0a0a0a] hover:bg-[#8ae63e]">
+              <Heart className="w-4 h-4" />
+              Wishlist
+            </Button>
           </div>
-        )}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-          {categoryStats.map((cat) => (
-            <Card key={cat.id} className="bg-card border-border hover:border-[#9CFF49]/15 transition-colors cursor-pointer group"
-              onClick={() => navigate(`/category/${cat.id}`)}>
-              <CardContent className="px-4 py-3.5">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2.5 min-w-0 flex-1">
-                    <div className="w-3 h-3 rounded-full shrink-0" style={{ backgroundColor: cat.color }} />
-                    {editingCategory === cat.id ? (
-                      <Input value={newCatName} onChange={(e) => setNewCatName(e.target.value)}
-                        onKeyDown={(e) => e.key === "Enter" && setEditingCategory(null)}
-                        onBlur={() => setEditingCategory(null)} className="h-7 w-36" autoFocus
-                        onClick={(e) => e.stopPropagation()} />
-                    ) : (
-                      <span className="text-foreground truncate" style={{ fontSize: "0.9rem" }}>{cat.name}</span>
-                    )}
-                  </div>
-                  <div className="flex items-center gap-4 shrink-0 ml-4">
-                    <div className="text-right">
-                      <p className="text-muted-foreground" style={{ fontSize: "0.6rem" }}>Figuras</p>
-                      <p className="text-foreground" style={{ fontSize: "0.9rem" }}>{cat.count}</p>
-                    </div>
-                    <div className="text-right">
-                      <p className="text-muted-foreground" style={{ fontSize: "0.6rem" }}>Valor</p>
-                      <p className="text-foreground" style={{ fontSize: "0.9rem" }}>{cat.totalValue}&euro;</p>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <button onClick={(e) => { e.stopPropagation(); setEditingCategory(cat.id); setNewCatName(cat.name); }}
-                        className="text-muted-foreground hover:text-foreground opacity-0 group-hover:opacity-100 transition-opacity">
-                        <Pencil className="w-3 h-3" />
-                      </button>
-                      <ChevronRight className="w-4 h-4 text-muted-foreground" />
-                    </div>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-          ))}
-        </div>
-      </div>
-
-      {/* ─── Resolve Dialog ─── */}
-      <Dialog open={!!resolveType} onOpenChange={() => setResolveType(null)}>
-        <DialogContent className="max-w-md">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              {resolveType === "missing_location" && <><MapPin className="w-5 h-5 text-purple-400" /> Asignar ubicacion</>}
-              {resolveType === "incomplete_data" && <><FileText className="w-5 h-5 text-orange-400" /> Completar datos</>}
-              {resolveType === "duplicate" && <><Copy className="w-5 h-5 text-blue-400" /> Verificar duplicado</>}
-              {resolveType === "variant" && <><AlertTriangle className="w-5 h-5 text-amber-400" /> Confirmar variante</>}
-            </DialogTitle>
-          </DialogHeader>
-
-          {resolveItem && (
-            <div className="space-y-4">
-              <div className="flex items-center gap-3 p-3 rounded-lg bg-secondary/30">
-                <div className="w-12 h-12 rounded-lg overflow-hidden shrink-0">
-                  <ImageWithFallback src={resolveItem.image} alt={resolveItem.name} className="w-full h-full object-cover" />
-                </div>
-                <div>
-                  <p className="text-foreground" style={{ fontSize: "0.85rem" }}>{resolveItem.name}</p>
-                  <p className="text-muted-foreground" style={{ fontSize: "0.7rem" }}>{resolveItem.issue}</p>
-                </div>
-              </div>
-
-              {resolveType === "missing_location" && (
-                <div className="space-y-2">
-                  <p className="text-muted-foreground" style={{ fontSize: "0.8rem" }}>Selecciona donde se encuentra esta figura:</p>
-                  <Select value={resolveLocation} onValueChange={setResolveLocation}>
-                    <SelectTrigger className="bg-secondary/50"><SelectValue placeholder="Seleccionar ubicacion..." /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="Vitrina A">Vitrina A</SelectItem>
-                      <SelectItem value="Vitrina B">Vitrina B</SelectItem>
-                      <SelectItem value="Vitrina C">Vitrina C</SelectItem>
-                      <SelectItem value="Almacen">Almacen</SelectItem>
-                      <SelectItem value="Estanteria">Estanteria</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-              )}
-
-              {resolveType === "incomplete_data" && (
-                <div className="space-y-3">
-                  <p className="text-muted-foreground" style={{ fontSize: "0.8rem" }}>Completa los campos que faltan:</p>
-                  <div className="space-y-2">
-                    <Input placeholder="UPC / Codigo de barras" className="bg-secondary/50" />
-                    <Select value={resolveLocation} onValueChange={setResolveLocation}>
-                      <SelectTrigger className="bg-secondary/50"><SelectValue placeholder="Ubicacion..." /></SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="Vitrina A">Vitrina A</SelectItem>
-                        <SelectItem value="Vitrina B">Vitrina B</SelectItem>
-                        <SelectItem value="Vitrina C">Vitrina C</SelectItem>
-                        <SelectItem value="Almacen">Almacen</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-                </div>
-              )}
-
-              {resolveType === "duplicate" && (
-                <div className="space-y-3">
-                  <p className="text-muted-foreground" style={{ fontSize: "0.8rem" }}>Hemos detectado que esta figura podria estar duplicada. Revisa y confirma:</p>
-                  <div className="flex gap-2">
-                    <Button variant="outline" className="flex-1" onClick={handleResolve}>No es duplicado</Button>
-                    <Button className="flex-1 bg-red-500/80 hover:bg-red-500 text-white" onClick={handleResolve}>Marcar como duplicado</Button>
-                  </div>
-                </div>
-              )}
-
-              {resolveType === "variant" && (
-                <div className="space-y-3">
-                  <p className="text-muted-foreground" style={{ fontSize: "0.8rem" }}>Confirma la variante correcta de esta figura:</p>
-                  <div className="space-y-1.5">
-                    {["Ultra Instinct Sign (pelo negro)", "Ultra Instinct Mastered (pelo plateado)"].map((v) => (
-                      <button key={v} onClick={() => { setResolveLocation(v); }}
-                        className={`w-full text-left px-3 py-2.5 rounded-lg border transition-colors ${resolveLocation === v ? "border-[#9CFF49] bg-[#9CFF49]/10 text-foreground" : "border-border text-muted-foreground hover:bg-accent/50"}`}
-                        style={{ fontSize: "0.8rem" }}>
-                        {v}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {resolveType !== "duplicate" && (
-                <Button
-                  className="w-full bg-[#9CFF49] text-[#0a0a0a] hover:bg-[#8ae63e] active:bg-[#7dd635] disabled:opacity-40 disabled:cursor-not-allowed"
-                  disabled={!resolveLocation && resolveType !== "incomplete_data"}
-                  onClick={handleResolve}
-                >
-                  Guardar cambios
-                </Button>
-              )}
-
-              <p className="text-muted-foreground/60 text-center" style={{ fontSize: "0.65rem" }}>
-                Completar estos datos mejora la valoracion y busqueda.
-              </p>
-            </div>
-          )}
-        </DialogContent>
-      </Dialog>
+        </CardContent>
+      </Card>
     </div>
   );
 }

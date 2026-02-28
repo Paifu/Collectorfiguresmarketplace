@@ -1,7 +1,10 @@
 import { useState, useRef, useEffect } from "react";
 import {
-  MOCK_CONVERSATIONS, MOCK_MARKET_LISTINGS,
-  type Conversation, type ChatMessage, type Offer,
+  MOCK_CONVERSATIONS,
+  MOCK_MARKET_LISTINGS,
+  type Conversation,
+  type ChatMessage,
+  type Offer,
 } from "../lib/mock-data";
 import { Badge } from "./ui/badge";
 import { Button } from "./ui/button";
@@ -10,9 +13,7 @@ import { Label } from "./ui/label";
 import { Textarea } from "./ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "./ui/dialog";
-import {
-  Send, HandCoins, Clock, Truck, MessageCircle, Store, Sparkles, Loader2,
-} from "lucide-react";
+import { Send, HandCoins, Clock, Truck, MessageCircle, Store } from "lucide-react";
 import { ImageWithFallback } from "./figma/ImageWithFallback";
 import { toast } from "sonner";
 import { useNavigate } from "react-router";
@@ -20,13 +21,13 @@ import { useNavigate } from "react-router";
 export function MessagesPage() {
   const [conversations, setConversations] = useState<Conversation[]>(MOCK_CONVERSATIONS);
 
-  // ✅ FIX: en mobile entramos SIEMPRE a la lista (sin chat abierto)
+  // ✅ Mobile: entramos viendo lista (no abrimos chat automáticamente)
   const [activeConvId, setActiveConvId] = useState<string | null>(null);
 
   const [newMessage, setNewMessage] = useState("");
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
-  // Detect desktop (md+) para auto-seleccionar el primer chat SOLO en desktop
+  // Detect desktop (md+)
   const [isDesktop, setIsDesktop] = useState(false);
   useEffect(() => {
     const mq = window.matchMedia("(min-width: 768px)");
@@ -36,7 +37,7 @@ export function MessagesPage() {
     return () => mq.removeEventListener?.("change", update);
   }, []);
 
-  // ✅ En desktop, si no hay chat seleccionado, abrimos el primero automáticamente
+  // ✅ Desktop: si no hay chat seleccionado, abrimos el primero
   useEffect(() => {
     if (!isDesktop) return;
     if (activeConvId) return;
@@ -58,6 +59,7 @@ export function MessagesPage() {
     ? MOCK_MARKET_LISTINGS.find((l) => l.id === activeConv.listingId) || null
     : null;
 
+  // ✅ autoscroll solo cuando hay chat
   useEffect(() => {
     if (!activeConv) return;
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -65,6 +67,7 @@ export function MessagesPage() {
 
   const handleSend = () => {
     if (!newMessage.trim() || !activeConvId) return;
+
     const msg: ChatMessage = {
       id: `msg-${Date.now()}`,
       senderId: "me",
@@ -74,10 +77,17 @@ export function MessagesPage() {
       isOwn: true,
       type: "text",
     };
+
     setConversations((convs) =>
       convs.map((c) =>
         c.id === activeConvId
-          ? { ...c, messages: [...c.messages, msg], lastMessage: newMessage, lastMessageTime: "Ahora", unread: 0 }
+          ? {
+              ...c,
+              messages: [...c.messages, msg],
+              lastMessage: newMessage,
+              lastMessageTime: "Ahora",
+              unread: 0,
+            }
           : c
       )
     );
@@ -86,6 +96,7 @@ export function MessagesPage() {
 
   const handleMakeOffer = () => {
     if (!offerAmount || !activeConvId) return;
+
     const offer: Offer = {
       id: `o-${Date.now()}`,
       amount: parseFloat(offerAmount),
@@ -100,6 +111,7 @@ export function MessagesPage() {
       status: "pending",
       timestamp: new Date().toLocaleTimeString("es-ES", { hour: "2-digit", minute: "2-digit" }),
     };
+
     const sysMsg: ChatMessage = {
       id: `msg-sys-${Date.now()}`,
       senderId: "system",
@@ -109,6 +121,7 @@ export function MessagesPage() {
       isOwn: false,
       type: "system",
     };
+
     const offerMsg: ChatMessage = {
       id: `msg-${Date.now()}`,
       senderId: "me",
@@ -119,6 +132,7 @@ export function MessagesPage() {
       type: "offer",
       offer,
     };
+
     setConversations((convs) =>
       convs.map((c) =>
         c.id === activeConvId
@@ -132,6 +146,7 @@ export function MessagesPage() {
           : c
       )
     );
+
     setShowOfferModal(false);
     setOfferAmount("");
     setOfferNote("");
@@ -145,7 +160,9 @@ export function MessagesPage() {
       <div className="flex flex-col items-center justify-center h-full py-20 text-muted-foreground">
         <MessageCircle className="w-12 h-12 mb-4 opacity-20" />
         <p style={{ fontSize: "0.9rem" }}>No tienes conversaciones</p>
-        <p style={{ fontSize: "0.8rem" }} className="mt-1">Contacta con un vendedor en el Marketplace</p>
+        <p style={{ fontSize: "0.8rem" }} className="mt-1">
+          Contacta con un vendedor en el Marketplace
+        </p>
         <Button variant="outline" className="mt-4 gap-1.5" onClick={() => navigate("/marketplace")}>
           <Store className="w-4 h-4" /> Ir al Marketplace
         </Button>
@@ -154,11 +171,14 @@ export function MessagesPage() {
   }
 
   return (
-    <div className="h-[calc(100vh-56px)] md:h-[calc(100vh-57px)] flex flex-col md:flex-row">
-      {/* Conversation list (Desktop) */}
+    // ✅ clave para sticky real en mobile: no scroll del body, solo del panel mensajes
+    <div className="h-[calc(100dvh-56px)] md:h-[calc(100dvh-57px)] overflow-hidden flex flex-col md:flex-row">
+      {/* ───────────────── Desktop list ───────────────── */}
       <div className="hidden md:flex flex-col w-72 border-r border-border bg-card shrink-0">
         <div className="p-3 border-b border-border">
-          <h2 className="text-foreground" style={{ fontSize: "0.9rem" }}>Mensajes</h2>
+          <h2 className="text-foreground" style={{ fontSize: "0.9rem" }}>
+            Mensajes
+          </h2>
         </div>
         <div className="flex-1 overflow-y-auto">
           {conversations.map((conv) => (
@@ -174,12 +194,20 @@ export function MessagesPage() {
                   <ImageWithFallback src={conv.listingImage} alt="" className="w-full h-full object-cover" />
                 </div>
                 <div className="flex-1 min-w-0">
-                  <p className="text-foreground truncate" style={{ fontSize: "0.8rem" }}>{conv.listingName}</p>
-                  <p className="text-muted-foreground truncate" style={{ fontSize: "0.7rem" }}>{conv.participantName}</p>
-                  <p className="text-muted-foreground truncate" style={{ fontSize: "0.65rem" }}>{conv.lastMessage}</p>
+                  <p className="text-foreground truncate" style={{ fontSize: "0.8rem" }}>
+                    {conv.listingName}
+                  </p>
+                  <p className="text-muted-foreground truncate" style={{ fontSize: "0.7rem" }}>
+                    {conv.participantName}
+                  </p>
+                  <p className="text-muted-foreground truncate" style={{ fontSize: "0.65rem" }}>
+                    {conv.lastMessage}
+                  </p>
                 </div>
                 <div className="flex flex-col items-end gap-1">
-                  <span className="text-muted-foreground" style={{ fontSize: "0.6rem" }}>{conv.lastMessageTime}</span>
+                  <span className="text-muted-foreground" style={{ fontSize: "0.6rem" }}>
+                    {conv.lastMessageTime}
+                  </span>
                   {conv.unread > 0 && (
                     <Badge className="w-5 h-5 flex items-center justify-center p-0 text-[0.55rem] bg-[#9CFF49] text-[#0a0a0a]">
                       {conv.unread}
@@ -192,16 +220,9 @@ export function MessagesPage() {
         </div>
       </div>
 
-      {/* ✅ Mobile: lista SIEMPRE (cuando no hay chat seleccionado) */}
+      {/* ───────────────── Mobile list ───────────────── */}
       {!activeConv && (
         <div className="md:hidden flex-1 overflow-y-auto bg-background">
-          <div className="p-3 border-b border-border bg-card">
-            <h2 className="text-foreground" style={{ fontSize: "0.9rem" }}>Mensajes</h2>
-            <p className="text-muted-foreground" style={{ fontSize: "0.7rem" }}>
-              {conversations.length} conversaciones
-            </p>
-          </div>
-
           {conversations.map((conv) => (
             <button
               key={conv.id}
@@ -209,30 +230,20 @@ export function MessagesPage() {
               className="w-full text-left p-3 border-b border-border hover:bg-accent/50 transition-colors"
             >
               <div className="flex items-center gap-2.5">
-                {/* Producto */}
                 <div className="w-12 h-12 rounded-lg overflow-hidden bg-secondary/30 shrink-0">
                   <ImageWithFallback src={conv.listingImage} alt="" className="w-full h-full object-cover" />
                 </div>
 
                 <div className="flex-1 min-w-0">
-                  <div className="flex items-center justify-between gap-2">
-                    <p className="text-foreground truncate" style={{ fontSize: "0.85rem" }}>{conv.listingName}</p>
-                    <span className="text-[#9CFF49] shrink-0" style={{ fontSize: "0.85rem" }}>
-                      {conv.listingPrice}&euro;
-                    </span>
-                  </div>
-
-                  <p className="text-muted-foreground truncate" style={{ fontSize: "0.75rem" }}>
-                    {conv.participantName}
+                  <p className="text-foreground truncate" style={{ fontSize: "0.85rem" }}>
+                    {conv.listingName}
                   </p>
-
-                  <p className="text-muted-foreground truncate" style={{ fontSize: "0.7rem" }}>
-                    {conv.lastMessage}
+                  <p className="text-muted-foreground truncate" style={{ fontSize: "0.75rem" }}>
+                    {conv.participantName} · {conv.lastMessage}
                   </p>
                 </div>
 
                 <div className="flex flex-col items-end gap-1 shrink-0">
-                  <span className="text-muted-foreground" style={{ fontSize: "0.6rem" }}>{conv.lastMessageTime}</span>
                   {conv.unread > 0 && <Badge className="bg-[#9CFF49] text-[#0a0a0a]">{conv.unread}</Badge>}
                 </div>
               </div>
@@ -241,13 +252,12 @@ export function MessagesPage() {
         </div>
       )}
 
-      {/* Chat area */}
+      {/* ───────────────── Chat view ───────────────── */}
       {activeConv && (
-        <div className="flex-1 flex flex-col bg-background">
-          {/* ✅ Header sticky con producto + usuario */}
-          <div className="border-b border-border bg-card sticky top-0 z-10">
+        <div className="flex-1 flex flex-col bg-background min-h-0">
+          {/* ✅ ESTO es lo que pedías: header STICKY */}
+          <div className="sticky top-0 z-20 border-b border-border bg-card/95 backdrop-blur supports-[backdrop-filter]:bg-card/80">
             <div className="flex items-center gap-3 p-3">
-              {/* Back en mobile para volver a lista */}
               <button
                 onClick={() => setActiveConvId(null)}
                 className="md:hidden text-muted-foreground"
@@ -263,11 +273,17 @@ export function MessagesPage() {
               </div>
 
               <div className="flex-1 min-w-0">
-                <p className="text-foreground truncate" style={{ fontSize: "0.85rem" }}>{activeConv.listingName}</p>
+                <p className="text-foreground truncate" style={{ fontSize: "0.85rem" }}>
+                  {activeConv.listingName}
+                </p>
                 <div className="flex items-center gap-2 flex-wrap">
-                  <span className="text-[#9CFF49]" style={{ fontSize: "0.85rem" }}>{activeConv.listingPrice}&euro;</span>
+                  <span className="text-[#9CFF49]" style={{ fontSize: "0.85rem" }}>
+                    {activeConv.listingPrice}&euro;
+                  </span>
                   {activeListing && <Badge variant="secondary" className="text-[0.55rem]">{activeListing.condition}</Badge>}
-                  <span className="text-muted-foreground" style={{ fontSize: "0.7rem" }}>&middot; {activeConv.participantName}</span>
+                  <span className="text-muted-foreground" style={{ fontSize: "0.7rem" }}>
+                    &middot; {activeConv.participantName}
+                  </span>
                 </div>
               </div>
 
@@ -277,13 +293,15 @@ export function MessagesPage() {
                 className="gap-1.5 shrink-0 bg-[#9CFF49] text-[#0a0a0a] hover:bg-[#8ae63e]"
               >
                 <HandCoins className="w-4 h-4" />
-                <span className="hidden sm:inline" style={{ fontSize: "0.8rem" }}>Hacer oferta</span>
+                <span className="hidden sm:inline" style={{ fontSize: "0.8rem" }}>
+                  Hacer oferta
+                </span>
               </Button>
             </div>
           </div>
 
-          {/* Messages */}
-          <div className="flex-1 overflow-y-auto p-4 space-y-2.5">
+          {/* ✅ SOLO este bloque hace scroll (para que el sticky funcione perfecto) */}
+          <div className="flex-1 min-h-0 overflow-y-auto p-4 space-y-2.5 overscroll-contain">
             {activeConv.messages.length === 0 && (
               <div className="flex flex-col items-center justify-center py-8 text-muted-foreground">
                 <p style={{ fontSize: "0.8rem" }}>Envia un mensaje o haz una oferta para empezar</p>
@@ -294,55 +312,94 @@ export function MessagesPage() {
               <div key={msg.id}>
                 {msg.type === "system" ? (
                   <div className="flex justify-center my-2">
-                    <span className="px-3 py-1 rounded-full bg-secondary/50 text-muted-foreground" style={{ fontSize: "0.7rem" }}>
+                    <span
+                      className="px-3 py-1 rounded-full bg-secondary/50 text-muted-foreground"
+                      style={{ fontSize: "0.7rem" }}
+                    >
                       {msg.text}
                     </span>
                   </div>
                 ) : (
                   <div className={`flex ${msg.isOwn ? "justify-end" : "justify-start"}`}>
                     {msg.type === "offer" && msg.offer ? (
-                      <div className={`max-w-[80%] p-3 rounded-xl border ${
-                        msg.offer.status === "accepted" ? "border-[#9CFF49]/30 bg-[#9CFF49]/5" :
-                        msg.offer.status === "rejected" ? "border-destructive/30 bg-destructive/5" :
-                        "border-amber-500/30 bg-amber-500/5"
-                      }`}>
+                      <div
+                        className={`max-w-[80%] p-3 rounded-xl border ${
+                          msg.offer.status === "accepted"
+                            ? "border-[#9CFF49]/30 bg-[#9CFF49]/5"
+                            : msg.offer.status === "rejected"
+                              ? "border-destructive/30 bg-destructive/5"
+                              : "border-amber-500/30 bg-amber-500/5"
+                        }`}
+                      >
                         <div className="flex items-center gap-2 mb-1.5">
                           <HandCoins className="w-4 h-4 text-amber-500" />
                           <span style={{ fontSize: "0.8rem" }} className="text-foreground">
                             {msg.isOwn ? "Tu oferta" : `Oferta de ${msg.senderName}`}
                           </span>
                         </div>
-                        <p style={{ fontSize: "1.2rem" }} className="text-foreground">{msg.offer.amount}&euro;</p>
-                        {msg.offer.note && <p className="text-muted-foreground mt-1" style={{ fontSize: "0.7rem" }}>{msg.offer.note}</p>}
+
+                        <p style={{ fontSize: "1.2rem" }} className="text-foreground">
+                          {msg.offer.amount}&euro;
+                        </p>
+
+                        {msg.offer.note && (
+                          <p className="text-muted-foreground mt-1" style={{ fontSize: "0.7rem" }}>
+                            {msg.offer.note}
+                          </p>
+                        )}
+
                         <div className="flex items-center gap-3 mt-2 text-muted-foreground" style={{ fontSize: "0.65rem" }}>
-                          <span className="flex items-center gap-1"><Truck className="w-3 h-3" />{msg.offer.shippingMethod}</span>
-                          <span className="flex items-center gap-1"><Clock className="w-3 h-3" />{msg.offer.expiry}</span>
+                          <span className="flex items-center gap-1">
+                            <Truck className="w-3 h-3" />
+                            {msg.offer.shippingMethod}
+                          </span>
+                          <span className="flex items-center gap-1">
+                            <Clock className="w-3 h-3" />
+                            {msg.offer.expiry}
+                          </span>
                         </div>
+
                         <Badge
                           className={`mt-2 text-[0.6rem] ${
                             msg.offer.status === "accepted" ? "bg-[#9CFF49] text-[#0a0a0a]" : ""
                           }`}
                           variant={msg.offer.status === "accepted" ? "default" : "secondary"}
                         >
-                          {msg.offer.status === "pending" ? "Pendiente" : msg.offer.status === "accepted" ? "Aceptada" : msg.offer.status === "rejected" ? "Rechazada" : "Expirada"}
+                          {msg.offer.status === "pending"
+                            ? "Pendiente"
+                            : msg.offer.status === "accepted"
+                              ? "Aceptada"
+                              : msg.offer.status === "rejected"
+                                ? "Rechazada"
+                                : "Expirada"}
                         </Badge>
                       </div>
                     ) : (
-                      <div className={`max-w-[75%] px-3.5 py-2 rounded-2xl ${
-                        msg.isOwn ? "bg-[#9CFF49] text-[#0a0a0a] rounded-br-md" : "bg-secondary text-foreground rounded-bl-md"
-                      }`}>
+                      <div
+                        className={`max-w-[75%] px-3.5 py-2 rounded-2xl ${
+                          msg.isOwn
+                            ? "bg-[#9CFF49] text-[#0a0a0a] rounded-br-md"
+                            : "bg-secondary text-foreground rounded-bl-md"
+                        }`}
+                      >
                         <p style={{ fontSize: "0.85rem" }}>{msg.text}</p>
-                        <p className={`mt-0.5 ${msg.isOwn ? "text-[#0a0a0a]/50" : "text-muted-foreground"}`} style={{ fontSize: "0.6rem" }}>{msg.timestamp}</p>
+                        <p
+                          className={`mt-0.5 ${msg.isOwn ? "text-[#0a0a0a]/50" : "text-muted-foreground"}`}
+                          style={{ fontSize: "0.6rem" }}
+                        >
+                          {msg.timestamp}
+                        </p>
                       </div>
                     )}
                   </div>
                 )}
               </div>
             ))}
+
             <div ref={messagesEndRef} />
           </div>
 
-          {/* Input */}
+          {/* Input fijo abajo */}
           <div className="p-3 border-t border-border bg-card">
             <div className="flex gap-2">
               <Button variant="outline" size="icon" onClick={() => setShowOfferModal(true)} className="shrink-0">
@@ -368,7 +425,7 @@ export function MessagesPage() {
         </div>
       )}
 
-      {/* ─── Make Offer Modal ─── */}
+      {/* Modal oferta */}
       <Dialog open={showOfferModal} onOpenChange={setShowOfferModal}>
         <DialogContent className="max-w-sm">
           <DialogHeader>
@@ -384,8 +441,12 @@ export function MessagesPage() {
                   <ImageWithFallback src={activeConv.listingImage} alt="" className="w-full h-full object-cover" />
                 </div>
                 <div>
-                  <p className="text-foreground" style={{ fontSize: "0.8rem" }}>{activeConv.listingName}</p>
-                  <p className="text-muted-foreground" style={{ fontSize: "0.7rem" }}>Precio: {activeConv.listingPrice}&euro;</p>
+                  <p className="text-foreground" style={{ fontSize: "0.8rem" }}>
+                    {activeConv.listingName}
+                  </p>
+                  <p className="text-muted-foreground" style={{ fontSize: "0.7rem" }}>
+                    Precio: {activeConv.listingPrice}&euro;
+                  </p>
                 </div>
               </div>
             )}
@@ -415,7 +476,9 @@ export function MessagesPage() {
               <div className="space-y-1.5">
                 <Label style={{ fontSize: "0.8rem" }}>Envio / Entrega</Label>
                 <Select value={offerShipping} onValueChange={setOfferShipping}>
-                  <SelectTrigger className="bg-secondary/50"><SelectValue /></SelectTrigger>
+                  <SelectTrigger className="bg-secondary/50">
+                    <SelectValue />
+                  </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="correos">Correos Express</SelectItem>
                     <SelectItem value="mensajeria">Mensajeria privada</SelectItem>
@@ -426,7 +489,9 @@ export function MessagesPage() {
               <div className="space-y-1.5">
                 <Label style={{ fontSize: "0.8rem" }}>Expiracion</Label>
                 <Select value={offerExpiry} onValueChange={setOfferExpiry}>
-                  <SelectTrigger className="bg-secondary/50"><SelectValue /></SelectTrigger>
+                  <SelectTrigger className="bg-secondary/50">
+                    <SelectValue />
+                  </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="24h">24 horas</SelectItem>
                     <SelectItem value="48h">48 horas</SelectItem>

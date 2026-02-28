@@ -20,14 +20,10 @@ import { useNavigate } from "react-router";
 
 export function MessagesPage() {
   const [conversations, setConversations] = useState<Conversation[]>(MOCK_CONVERSATIONS);
-
-  // ✅ Mobile: entramos viendo lista (no abrimos chat automáticamente)
   const [activeConvId, setActiveConvId] = useState<string | null>(null);
-
   const [newMessage, setNewMessage] = useState("");
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
-  // Detect desktop (md+)
   const [isDesktop, setIsDesktop] = useState(false);
   useEffect(() => {
     const mq = window.matchMedia("(min-width: 768px)");
@@ -37,16 +33,13 @@ export function MessagesPage() {
     return () => mq.removeEventListener?.("change", update);
   }, []);
 
-  // ✅ Desktop: si no hay chat seleccionado, abrimos el primero
   useEffect(() => {
     if (!isDesktop) return;
     if (activeConvId) return;
     if (conversations.length === 0) return;
     setActiveConvId(conversations[0].id);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isDesktop, conversations.length]);
+  }, [isDesktop, conversations, activeConvId]);
 
-  // Offer modal
   const [showOfferModal, setShowOfferModal] = useState(false);
   const [offerAmount, setOfferAmount] = useState("");
   const [offerNote, setOfferNote] = useState("");
@@ -54,16 +47,14 @@ export function MessagesPage() {
   const [offerExpiry, setOfferExpiry] = useState("48h");
 
   const activeConv = conversations.find((c) => c.id === activeConvId) || null;
-
   const activeListing = activeConv
     ? MOCK_MARKET_LISTINGS.find((l) => l.id === activeConv.listingId) || null
     : null;
 
-  // ✅ autoscroll solo cuando hay chat
   useEffect(() => {
     if (!activeConv) return;
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [activeConv?.messages.length]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [activeConv?.messages.length]);
 
   const handleSend = () => {
     if (!newMessage.trim() || !activeConvId) return;
@@ -78,8 +69,8 @@ export function MessagesPage() {
       type: "text",
     };
 
-    setConversations((convs) =>
-      convs.map((c) =>
+    setConversations((prev) =>
+      prev.map((c) =>
         c.id === activeConvId
           ? {
               ...c,
@@ -91,6 +82,7 @@ export function MessagesPage() {
           : c
       )
     );
+
     setNewMessage("");
   };
 
@@ -106,8 +98,8 @@ export function MessagesPage() {
         offerShipping === "correos"
           ? "Correos Express"
           : offerShipping === "mano"
-            ? "En mano"
-            : "Mensajeria",
+          ? "En mano"
+          : "Mensajeria",
       status: "pending",
       timestamp: new Date().toLocaleTimeString("es-ES", { hour: "2-digit", minute: "2-digit" }),
     };
@@ -133,8 +125,8 @@ export function MessagesPage() {
       offer,
     };
 
-    setConversations((convs) =>
-      convs.map((c) =>
+    setConversations((prev) =>
+      prev.map((c) =>
         c.id === activeConvId
           ? {
               ...c,
@@ -155,254 +147,125 @@ export function MessagesPage() {
 
   const navigate = useNavigate();
 
-  if (conversations.length === 0) {
-    return (
-      <div className="flex flex-col items-center justify-center h-full py-20 text-muted-foreground">
-        <MessageCircle className="w-12 h-12 mb-4 opacity-20" />
-        <p style={{ fontSize: "0.9rem" }}>No tienes conversaciones</p>
-        <p style={{ fontSize: "0.8rem" }} className="mt-1">
-          Contacta con un vendedor en el Marketplace
-        </p>
-        <Button variant="outline" className="mt-4 gap-1.5" onClick={() => navigate("/marketplace")}>
-          <Store className="w-4 h-4" /> Ir al Marketplace
-        </Button>
-      </div>
-    );
-  }
-
   return (
-    // ✅ clave para sticky real en mobile: no scroll del body, solo del panel mensajes
     <div className="h-[calc(100dvh-56px)] md:h-[calc(100dvh-57px)] overflow-hidden flex flex-col md:flex-row">
-      {/* ───────────────── Desktop list ───────────────── */}
+      {/* Desktop list */}
       <div className="hidden md:flex flex-col w-72 border-r border-border bg-card shrink-0">
         <div className="p-3 border-b border-border">
-          <h2 className="text-foreground" style={{ fontSize: "0.9rem" }}>
-            Mensajes
-          </h2>
+          <h2 className="text-foreground text-sm">Mensajes</h2>
         </div>
         <div className="flex-1 overflow-y-auto">
           {conversations.map((conv) => (
             <button
               key={conv.id}
               onClick={() => setActiveConvId(conv.id)}
-              className={`w-full text-left p-3 border-b border-border hover:bg-accent/50 transition-colors ${
+              className={`w-full text-left p-3 border-b border-border hover:bg-accent/50 ${
                 activeConvId === conv.id ? "bg-accent/50" : ""
               }`}
             >
-              <div className="flex items-center gap-2.5">
-                <div className="w-10 h-10 rounded-lg overflow-hidden bg-secondary/30 shrink-0">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-lg overflow-hidden bg-secondary/30">
                   <ImageWithFallback src={conv.listingImage} alt="" className="w-full h-full object-cover" />
                 </div>
                 <div className="flex-1 min-w-0">
-                  <p className="text-foreground truncate" style={{ fontSize: "0.8rem" }}>
-                    {conv.listingName}
-                  </p>
-                  <p className="text-muted-foreground truncate" style={{ fontSize: "0.7rem" }}>
+                  <p className="truncate text-sm">{conv.listingName}</p>
+                  <p className="truncate text-xs text-muted-foreground">
                     {conv.participantName}
                   </p>
-                  <p className="text-muted-foreground truncate" style={{ fontSize: "0.65rem" }}>
-                    {conv.lastMessage}
-                  </p>
                 </div>
-                <div className="flex flex-col items-end gap-1">
-                  <span className="text-muted-foreground" style={{ fontSize: "0.6rem" }}>
-                    {conv.lastMessageTime}
-                  </span>
-                  {conv.unread > 0 && (
-                    <Badge className="w-5 h-5 flex items-center justify-center p-0 text-[0.55rem] bg-[#9CFF49] text-[#0a0a0a]">
-                      {conv.unread}
-                    </Badge>
-                  )}
-                </div>
+                {conv.unread > 0 && (
+                  <Badge className="bg-[#9CFF49] text-black">{conv.unread}</Badge>
+                )}
               </div>
             </button>
           ))}
         </div>
       </div>
 
-      {/* ───────────────── Mobile list ───────────────── */}
+      {/* Mobile list */}
       {!activeConv && (
         <div className="md:hidden flex-1 overflow-y-auto bg-background">
           {conversations.map((conv) => (
             <button
               key={conv.id}
               onClick={() => setActiveConvId(conv.id)}
-              className="w-full text-left p-3 border-b border-border hover:bg-accent/50 transition-colors"
+              className="w-full text-left p-3 border-b border-border"
             >
-              <div className="flex items-center gap-2.5">
-                <div className="w-12 h-12 rounded-lg overflow-hidden bg-secondary/30 shrink-0">
+              <div className="flex items-center gap-3">
+                <div className="w-12 h-12 rounded-lg overflow-hidden bg-secondary/30">
                   <ImageWithFallback src={conv.listingImage} alt="" className="w-full h-full object-cover" />
                 </div>
-
                 <div className="flex-1 min-w-0">
-                  <p className="text-foreground truncate" style={{ fontSize: "0.85rem" }}>
-                    {conv.listingName}
-                  </p>
-                  <p className="text-muted-foreground truncate" style={{ fontSize: "0.75rem" }}>
+                  <p className="truncate text-sm">{conv.listingName}</p>
+                  <p className="truncate text-xs text-muted-foreground">
                     {conv.participantName} · {conv.lastMessage}
                   </p>
                 </div>
-
-                <div className="flex flex-col items-end gap-1 shrink-0">
-                  {conv.unread > 0 && <Badge className="bg-[#9CFF49] text-[#0a0a0a]">{conv.unread}</Badge>}
-                </div>
+                {conv.unread > 0 && (
+                  <Badge className="bg-[#9CFF49] text-black">{conv.unread}</Badge>
+                )}
               </div>
             </button>
           ))}
         </div>
       )}
 
-      {/* ───────────────── Chat view ───────────────── */}
+      {/* Chat */}
       {activeConv && (
-        <div className="flex-1 flex flex-col bg-background min-h-0">
-          {/* ✅ ESTO es lo que pedías: header STICKY */}
-          <div className="sticky top-0 z-20 border-b border-border bg-card/95 backdrop-blur supports-[backdrop-filter]:bg-card/80">
-            <div className="flex items-center gap-3 p-3">
-              <button
-                onClick={() => setActiveConvId(null)}
-                className="md:hidden text-muted-foreground"
-                aria-label="Volver"
-              >
-                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
-                </svg>
-              </button>
+        <div className="flex-1 flex flex-col min-h-0 bg-background">
 
-              <div className="w-11 h-11 rounded-lg overflow-hidden bg-secondary/30 shrink-0">
+          {/* 🔥 STICKY HEADER */}
+          <div className="sticky top-0 z-30 bg-card border-b border-border">
+            <div className="flex items-center gap-3 p-3">
+              <button onClick={() => setActiveConvId(null)} className="md:hidden">
+                ←
+              </button>
+              <div className="w-11 h-11 rounded-lg overflow-hidden bg-secondary/30">
                 <ImageWithFallback src={activeConv.listingImage} alt="" className="w-full h-full object-cover" />
               </div>
-
               <div className="flex-1 min-w-0">
-                <p className="text-foreground truncate" style={{ fontSize: "0.85rem" }}>
-                  {activeConv.listingName}
-                </p>
-                <div className="flex items-center gap-2 flex-wrap">
-                  <span className="text-[#9CFF49]" style={{ fontSize: "0.85rem" }}>
-                    {activeConv.listingPrice}&euro;
+                <p className="truncate text-sm">{activeConv.listingName}</p>
+                <div className="flex gap-2 text-xs">
+                  <span className="text-[#9CFF49] font-semibold">
+                    {activeConv.listingPrice}€
                   </span>
-                  {activeListing && <Badge variant="secondary" className="text-[0.55rem]">{activeListing.condition}</Badge>}
-                  <span className="text-muted-foreground" style={{ fontSize: "0.7rem" }}>
-                    &middot; {activeConv.participantName}
+                  <span className="text-muted-foreground">
+                    · {activeConv.participantName}
                   </span>
                 </div>
               </div>
-
               <Button
                 size="sm"
                 onClick={() => setShowOfferModal(true)}
-                className="gap-1.5 shrink-0 bg-[#9CFF49] text-[#0a0a0a] hover:bg-[#8ae63e]"
+                className="bg-[#9CFF49] text-black"
               >
                 <HandCoins className="w-4 h-4" />
-                <span className="hidden sm:inline" style={{ fontSize: "0.8rem" }}>
-                  Hacer oferta
-                </span>
               </Button>
             </div>
           </div>
 
-          {/* ✅ SOLO este bloque hace scroll (para que el sticky funcione perfecto) */}
-          <div className="flex-1 min-h-0 overflow-y-auto p-4 space-y-2.5 overscroll-contain">
-            {activeConv.messages.length === 0 && (
-              <div className="flex flex-col items-center justify-center py-8 text-muted-foreground">
-                <p style={{ fontSize: "0.8rem" }}>Envia un mensaje o haz una oferta para empezar</p>
-              </div>
-            )}
-
+          {/* 🔥 SCROLL AREA */}
+          <div className="flex-1 overflow-y-auto p-4 space-y-3">
             {activeConv.messages.map((msg) => (
-              <div key={msg.id}>
-                {msg.type === "system" ? (
-                  <div className="flex justify-center my-2">
-                    <span
-                      className="px-3 py-1 rounded-full bg-secondary/50 text-muted-foreground"
-                      style={{ fontSize: "0.7rem" }}
-                    >
-                      {msg.text}
-                    </span>
-                  </div>
-                ) : (
-                  <div className={`flex ${msg.isOwn ? "justify-end" : "justify-start"}`}>
-                    {msg.type === "offer" && msg.offer ? (
-                      <div
-                        className={`max-w-[80%] p-3 rounded-xl border ${
-                          msg.offer.status === "accepted"
-                            ? "border-[#9CFF49]/30 bg-[#9CFF49]/5"
-                            : msg.offer.status === "rejected"
-                              ? "border-destructive/30 bg-destructive/5"
-                              : "border-amber-500/30 bg-amber-500/5"
-                        }`}
-                      >
-                        <div className="flex items-center gap-2 mb-1.5">
-                          <HandCoins className="w-4 h-4 text-amber-500" />
-                          <span style={{ fontSize: "0.8rem" }} className="text-foreground">
-                            {msg.isOwn ? "Tu oferta" : `Oferta de ${msg.senderName}`}
-                          </span>
-                        </div>
-
-                        <p style={{ fontSize: "1.2rem" }} className="text-foreground">
-                          {msg.offer.amount}&euro;
-                        </p>
-
-                        {msg.offer.note && (
-                          <p className="text-muted-foreground mt-1" style={{ fontSize: "0.7rem" }}>
-                            {msg.offer.note}
-                          </p>
-                        )}
-
-                        <div className="flex items-center gap-3 mt-2 text-muted-foreground" style={{ fontSize: "0.65rem" }}>
-                          <span className="flex items-center gap-1">
-                            <Truck className="w-3 h-3" />
-                            {msg.offer.shippingMethod}
-                          </span>
-                          <span className="flex items-center gap-1">
-                            <Clock className="w-3 h-3" />
-                            {msg.offer.expiry}
-                          </span>
-                        </div>
-
-                        <Badge
-                          className={`mt-2 text-[0.6rem] ${
-                            msg.offer.status === "accepted" ? "bg-[#9CFF49] text-[#0a0a0a]" : ""
-                          }`}
-                          variant={msg.offer.status === "accepted" ? "default" : "secondary"}
-                        >
-                          {msg.offer.status === "pending"
-                            ? "Pendiente"
-                            : msg.offer.status === "accepted"
-                              ? "Aceptada"
-                              : msg.offer.status === "rejected"
-                                ? "Rechazada"
-                                : "Expirada"}
-                        </Badge>
-                      </div>
-                    ) : (
-                      <div
-                        className={`max-w-[75%] px-3.5 py-2 rounded-2xl ${
-                          msg.isOwn
-                            ? "bg-[#9CFF49] text-[#0a0a0a] rounded-br-md"
-                            : "bg-secondary text-foreground rounded-bl-md"
-                        }`}
-                      >
-                        <p style={{ fontSize: "0.85rem" }}>{msg.text}</p>
-                        <p
-                          className={`mt-0.5 ${msg.isOwn ? "text-[#0a0a0a]/50" : "text-muted-foreground"}`}
-                          style={{ fontSize: "0.6rem" }}
-                        >
-                          {msg.timestamp}
-                        </p>
-                      </div>
-                    )}
-                  </div>
-                )}
+              <div key={msg.id} className={`flex ${msg.isOwn ? "justify-end" : "justify-start"}`}>
+                <div
+                  className={`max-w-[75%] px-3 py-2 rounded-xl text-sm ${
+                    msg.isOwn
+                      ? "bg-[#9CFF49] text-black"
+                      : "bg-secondary text-foreground"
+                  }`}
+                >
+                  {msg.text}
+                </div>
               </div>
             ))}
-
             <div ref={messagesEndRef} />
           </div>
 
-          {/* Input fijo abajo */}
-          <div className="p-3 border-t border-border bg-card">
+          {/* 🔥 STICKY INPUT */}
+          <div className="sticky bottom-0 z-30 bg-card border-t border-border p-3">
             <div className="flex gap-2">
-              <Button variant="outline" size="icon" onClick={() => setShowOfferModal(true)} className="shrink-0">
+              <Button variant="outline" size="icon" onClick={() => setShowOfferModal(true)}>
                 <HandCoins className="w-4 h-4" />
               </Button>
               <Input
@@ -410,14 +273,8 @@ export function MessagesPage() {
                 onChange={(e) => setNewMessage(e.target.value)}
                 onKeyDown={(e) => e.key === "Enter" && handleSend()}
                 placeholder="Escribe un mensaje..."
-                className="bg-secondary/50"
               />
-              <Button
-                onClick={handleSend}
-                size="icon"
-                disabled={!newMessage.trim()}
-                className="bg-[#9CFF49] text-[#0a0a0a] hover:bg-[#8ae63e]"
-              >
+              <Button onClick={handleSend} size="icon" className="bg-[#9CFF49] text-black">
                 <Send className="w-4 h-4" />
               </Button>
             </div>
@@ -425,87 +282,28 @@ export function MessagesPage() {
         </div>
       )}
 
-      {/* Modal oferta */}
+      {/* Offer Modal */}
       <Dialog open={showOfferModal} onOpenChange={setShowOfferModal}>
-        <DialogContent className="max-w-sm">
+        <DialogContent>
           <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <HandCoins className="w-5 h-5" /> Hacer oferta
-            </DialogTitle>
+            <DialogTitle>Hacer oferta</DialogTitle>
           </DialogHeader>
 
           <div className="space-y-4">
-            {activeConv && (
-              <div className="flex gap-3 p-3 rounded-lg bg-secondary/30">
-                <div className="w-14 h-14 rounded-lg overflow-hidden bg-secondary shrink-0">
-                  <ImageWithFallback src={activeConv.listingImage} alt="" className="w-full h-full object-cover" />
-                </div>
-                <div>
-                  <p className="text-foreground" style={{ fontSize: "0.8rem" }}>
-                    {activeConv.listingName}
-                  </p>
-                  <p className="text-muted-foreground" style={{ fontSize: "0.7rem" }}>
-                    Precio: {activeConv.listingPrice}&euro;
-                  </p>
-                </div>
-              </div>
-            )}
+            <Input
+              type="number"
+              value={offerAmount}
+              onChange={(e) => setOfferAmount(e.target.value)}
+              placeholder="Tu precio"
+            />
 
-            <div className="space-y-1.5">
-              <Label style={{ fontSize: "0.8rem" }}>Tu precio propuesto (&euro;) *</Label>
-              <Input
-                type="number"
-                value={offerAmount}
-                onChange={(e) => setOfferAmount(e.target.value)}
-                placeholder="0.00"
-                className="bg-secondary/50"
-              />
-            </div>
+            <Textarea
+              value={offerNote}
+              onChange={(e) => setOfferNote(e.target.value)}
+              placeholder="Nota opcional"
+            />
 
-            <div className="space-y-1.5">
-              <Label style={{ fontSize: "0.8rem" }}>Nota (opcional)</Label>
-              <Textarea
-                value={offerNote}
-                onChange={(e) => setOfferNote(e.target.value)}
-                placeholder="Ej: Recojo en mano si es en Madrid"
-                className="bg-secondary/50 min-h-[60px]"
-              />
-            </div>
-
-            <div className="grid grid-cols-2 gap-3">
-              <div className="space-y-1.5">
-                <Label style={{ fontSize: "0.8rem" }}>Envio / Entrega</Label>
-                <Select value={offerShipping} onValueChange={setOfferShipping}>
-                  <SelectTrigger className="bg-secondary/50">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="correos">Correos Express</SelectItem>
-                    <SelectItem value="mensajeria">Mensajeria privada</SelectItem>
-                    <SelectItem value="mano">En mano</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="space-y-1.5">
-                <Label style={{ fontSize: "0.8rem" }}>Expiracion</Label>
-                <Select value={offerExpiry} onValueChange={setOfferExpiry}>
-                  <SelectTrigger className="bg-secondary/50">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="24h">24 horas</SelectItem>
-                    <SelectItem value="48h">48 horas</SelectItem>
-                    <SelectItem value="7d">7 dias</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
-
-            <Button
-              onClick={handleMakeOffer}
-              className="w-full bg-[#9CFF49] text-[#0a0a0a] hover:bg-[#8ae63e]"
-              disabled={!offerAmount}
-            >
+            <Button onClick={handleMakeOffer} className="w-full bg-[#9CFF49] text-black">
               Enviar oferta
             </Button>
           </div>
